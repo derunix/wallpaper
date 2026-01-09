@@ -1,0 +1,524 @@
+{
+  "title": "Neon Circuit HUD",
+  "type": "web",
+  "file": "index.html",
+  "preview": "lg.jpg",
+  "description": "Audio-reactive neon circuit HUD with now playing, weather for Tbilisi, hardware metrics, and adaptive sci-fi system states.",
+  "general": {
+    "supportsaudioprocessing": true,
+    "properties": {
+      "themecolorprimary": {
+        "order": 0,
+        "text": "Primary color",
+        "type": "color",
+        "value": "0.553 0.988 0.31"
+      },
+      "themecolorsecondary": {
+        "order": 1,
+        "text": "Secondary color",
+        "type": "color",
+        "value": "0.247 0.906 1"
+      },
+      "backgroundcolor": {
+        "order": 2,
+        "text": "Background color",
+        "type": "color",
+        "value": "0.016 0.027 0.039"
+      },
+      "linethickness": {
+        "order": 3,
+        "text": "Line thickness",
+        "type": "slider",
+        "min": 2,
+        "max": 10,
+        "value": 4
+      },
+      "gridenabled": {
+        "order": 4,
+        "text": "Grid enabled",
+        "type": "bool",
+        "value": true
+      },
+      "griddensity": {
+        "order": 5,
+        "text": "Grid density",
+        "type": "slider",
+        "min": 8,
+        "max": 64,
+        "value": 32
+      },
+      "audiosensitivity": {
+        "order": 6,
+        "text": "Audio sensitivity",
+        "type": "slider",
+        "min": 0.2,
+        "max": 3,
+        "value": 3
+      },
+      "audiosmoothing": {
+        "order": 7,
+        "text": "Audio smoothing",
+        "type": "slider",
+        "min": 0,
+        "max": 1,
+        "value": 0.35
+      },
+      "barscount": {
+        "order": 8,
+        "text": "Bars count",
+        "type": "slider",
+        "min": 16,
+        "max": 128,
+        "value": 64
+      },
+      "waveformenabled": {
+        "order": 9,
+        "text": "Waveform enabled",
+        "type": "bool",
+        "value": true
+      },
+      "waveformheight": {
+        "order": 10,
+        "text": "Waveform height",
+        "type": "slider",
+        "min": 0.05,
+        "max": 0.5,
+        "value": 0.25
+      },
+      "backgroundequalizeralpha": {
+        "order": 11,
+        "text": "Background equalizer alpha",
+        "type": "slider",
+        "min": 0.1,
+        "max": 1,
+        "value": 0.35
+      },
+      "nowplayingenabled": {
+        "order": 12,
+        "text": "Now playing enabled",
+        "type": "bool",
+        "value": true
+      },
+      "coversize": {
+        "order": 13,
+        "text": "Cover size",
+        "type": "slider",
+        "min": 120,
+        "max": 320,
+        "value": 200
+      },
+      "coverposition": {
+        "order": 14,
+        "text": "Cover position",
+        "type": "combo",
+        "value": "left",
+        "options": [
+          { "value": "left", "label": "Left" },
+          { "value": "right", "label": "Right" }
+        ]
+      },
+      "coverstyle": {
+        "order": 15,
+        "text": "Cover style",
+        "type": "combo",
+        "value": "square",
+        "options": [
+          { "value": "square", "label": "Square" },
+          { "value": "rounded", "label": "Rounded" }
+        ]
+      },
+      "layoutpreset": {
+        "order": 16,
+        "text": "Layout preset",
+        "type": "combo",
+        "value": "Left HUD",
+        "options": [
+          { "value": "Left HUD", "label": "Left HUD" },
+          { "value": "Right HUD", "label": "Right HUD" },
+          { "value": "Top HUD", "label": "Top HUD" }
+        ]
+      },
+      "hwpollintervalsec": {
+        "order": 17,
+        "text": "Hardware poll interval (sec)",
+        "type": "slider",
+        "min": 2,
+        "max": 60,
+        "value": 5
+      },
+      "weatherenabled": {
+        "order": 18,
+        "text": "Weather enabled",
+        "type": "bool",
+        "value": true
+      },
+      "weatherprovider": {
+        "order": 19,
+        "text": "Weather provider",
+        "type": "combo",
+        "value": "open-meteo",
+        "options": [
+          { "value": "open-meteo", "label": "Open-Meteo (no key)" },
+          { "value": "owm", "label": "OpenWeather (API key)" }
+        ]
+      },
+      "weatherapikey": {
+        "order": 20,
+        "text": "Weather API key",
+        "type": "text",
+        "value": ""
+      },
+      "units": {
+        "order": 21,
+        "text": "Units",
+        "type": "combo",
+        "value": "metric",
+        "options": [
+          { "value": "metric", "label": "Metric" },
+          { "value": "imperial", "label": "Imperial" }
+        ]
+      },
+      "language": {
+        "order": 22,
+        "text": "Language",
+        "type": "combo",
+        "value": "ru-RU",
+        "options": [
+          { "value": "en-US", "label": "English" },
+          { "value": "ru-RU", "label": "Русский" }
+        ]
+      },
+      "textscale": {
+        "order": 23,
+        "text": "Text scale",
+        "type": "slider",
+        "min": 0.8,
+        "max": 1.6,
+        "value": 1.25
+      },
+      "showseconds": {
+        "order": 24,
+        "text": "Show seconds",
+        "type": "bool",
+        "value": true
+      },
+      "visualprofile": {
+        "order": 25,
+        "text": "Visual profile",
+        "type": "combo",
+        "value": "ENGINEERING",
+        "options": [
+          { "value": "ENGINEERING", "label": "Engineering" },
+          { "value": "DIAGNOSTIC", "label": "Diagnostic" },
+          { "value": "OBSERVATION", "label": "Observation" },
+          { "value": "MINIMAL", "label": "Minimal" }
+        ]
+      },
+      "entropylevel": {
+        "order": 26,
+        "text": "Entropy level",
+        "type": "slider",
+        "min": 0,
+        "max": 1,
+        "value": 0.45
+      },
+      "behaviormemoryenabled": {
+        "order": 27,
+        "text": "Behavior memory",
+        "type": "bool",
+        "value": true
+      },
+      "narrativeeventsenabled": {
+        "order": 28,
+        "text": "Narrative events",
+        "type": "bool",
+        "value": true
+      },
+      "degradationenabled": {
+        "order": 29,
+        "text": "Degradation enabled",
+        "type": "bool",
+        "value": true
+      },
+      "timeofdayadaptive": {
+        "order": 30,
+        "text": "Time-of-day adaptive",
+        "type": "bool",
+        "value": true
+      },
+      "hiddengesturesenabled": {
+        "order": 31,
+        "text": "Hidden gestures",
+        "type": "bool",
+        "value": true
+      },
+      "interactivityenabled": {
+        "order": 32,
+        "text": "Interactivity enabled",
+        "type": "bool",
+        "value": true
+      },
+      "hovereffectsenabled": {
+        "order": 33,
+        "text": "Hover effects",
+        "type": "bool",
+        "value": true
+      },
+      "clickeffectsenabled": {
+        "order": 34,
+        "text": "Click effects",
+        "type": "bool",
+        "value": true
+      },
+      "cursortrailenabled": {
+        "order": 35,
+        "text": "Cursor trail",
+        "type": "bool",
+        "value": true
+      },
+      "parallaxenabled": {
+        "order": 36,
+        "text": "Parallax",
+        "type": "bool",
+        "value": true
+      },
+      "interactivecontrolsenabled": {
+        "order": 37,
+        "text": "Interactive controls",
+        "type": "bool",
+        "value": true
+      },
+      "idletimeoutsec": {
+        "order": 38,
+        "text": "Idle timeout (sec)",
+        "type": "slider",
+        "min": 10,
+        "max": 300,
+        "value": 60
+      },
+      "uiresponsiveness": {
+        "order": 39,
+        "text": "UI responsiveness",
+        "type": "slider",
+        "min": 0.5,
+        "max": 2,
+        "value": 1
+      },
+      "tooltipsenabled": {
+        "order": 40,
+        "text": "Tooltips",
+        "type": "bool",
+        "value": false
+      },
+      "diagnosticsenabled": {
+        "order": 41,
+        "text": "Diagnostics",
+        "type": "bool",
+        "value": false
+      },
+      "thresholdscpuhigh": {
+        "order": 42,
+        "text": "CPU high threshold",
+        "type": "slider",
+        "min": 50,
+        "max": 100,
+        "value": 80
+      },
+      "thresholdsgpuhigh": {
+        "order": 43,
+        "text": "GPU high threshold",
+        "type": "slider",
+        "min": 50,
+        "max": 100,
+        "value": 80
+      },
+      "thresholdsnethigh": {
+        "order": 44,
+        "text": "Network high threshold",
+        "type": "slider",
+        "min": 50,
+        "max": 100,
+        "value": 80
+      },
+      "glitchesenabled": {
+        "order": 45,
+        "text": "Glitches enabled",
+        "type": "bool",
+        "value": true
+      },
+      "glitchintervalminsec": {
+        "order": 46,
+        "text": "Glitch interval min (sec)",
+        "type": "slider",
+        "min": 5,
+        "max": 30,
+        "value": 10
+      },
+      "glitchintervalmaxsec": {
+        "order": 47,
+        "text": "Glitch interval max (sec)",
+        "type": "slider",
+        "min": 8,
+        "max": 45,
+        "value": 10
+      },
+      "glitchintensity": {
+        "order": 48,
+        "text": "Glitch intensity",
+        "type": "slider",
+        "min": 0.2,
+        "max": 2,
+        "value": 1
+      },
+      "musicreactiveglitches": {
+        "order": 49,
+        "text": "Music reactive glitches",
+        "type": "bool",
+        "value": true
+      },
+      "maxsimultaneousglitches": {
+        "order": 50,
+        "text": "Max simultaneous glitches",
+        "type": "slider",
+        "min": 1,
+        "max": 3,
+        "value": 3
+      },
+      "allowscreenwideeffects": {
+        "order": 51,
+        "text": "Allow screen-wide effects",
+        "type": "bool",
+        "value": true
+      },
+      "bigeventchance": {
+        "order": 52,
+        "text": "Big event chance",
+        "type": "slider",
+        "min": 0,
+        "max": 1,
+        "value": 0.5
+      },
+      "chromaticaberrationenabled": {
+        "order": 53,
+        "text": "Chromatic aberration",
+        "type": "bool",
+        "value": true
+      },
+      "alienalphabetstrength": {
+        "order": 54,
+        "text": "Alien alphabet strength",
+        "type": "slider",
+        "min": 0,
+        "max": 1,
+        "value": 0.7
+      },
+      "aliensymbolset": {
+        "order": 55,
+        "text": "Alien symbol set",
+        "type": "text",
+        "value": "⌖⌬⍜⍰⟁⟟⌰⌇⎔⌿⍟⍤⍣⍧⍨⍩⍪⍫⍬⍭⍮⍯⍱⍲⍳⍴⍵⍶⍷⍸⍹⍺⍻⍼⍽⍾⍿⎀⎁⎂⎃⎄⎅⎆⎇⎈⎉⎊⎋⎌⎍⎎⎏⎐⎑⎒⎓⎔⎕⎖⎗⎘⎙⎚⎛⎜⎝⎞⎟⎠⎢⎣⎤⎥⎦⎧⎨⎩⎪⎫⎬⎭⎮⎯⎰⎱⏃⏄⏅⏆⏇⏈⏉⏊⏋⏌⏍⏎⏏⏐⏑⏒⏓⏔⏕⏖⏗⏘⏙⏚⏛⏜⏝⏞⏟⏠⏡⏢⏣⏤⏥△▲▽▼◆◇◈◉○●◌◍◎◐◑◒◓◔◕◖◗◢◣◤◥⟐⟑⟒⟓⟔⟕⟖⟗⟘⟙⟚⟛⟜⟝⟞⟟⟠⟡⟢⟣⟤⟥⟦⟧⟨⟩⟪⟫⟬⟭⟮⟯"
+      },
+      "debugglitchoverlay": {
+        "order": 56,
+        "text": "Glitch debug overlay",
+        "type": "bool",
+        "value": false
+      },
+      "externalipenabled": {
+        "order": 57,
+        "text": "External IP",
+        "type": "bool",
+        "value": true
+      },
+      "semantictextenabled": {
+        "order": 58,
+        "text": "Semantic text enabled",
+        "type": "bool",
+        "value": true
+      },
+      "semantictextfrequency": {
+        "order": 59,
+        "text": "Semantic text frequency",
+        "type": "slider",
+        "min": 0.4,
+        "max": 2,
+        "value": 1
+      },
+      "semantictextverbosity": {
+        "order": 60,
+        "text": "Semantic text verbosity",
+        "type": "slider",
+        "min": 0.4,
+        "max": 1.4,
+        "value": 0.9
+      },
+      "semantictextsarcasm": {
+        "order": 61,
+        "text": "Semantic text sarcasm",
+        "type": "slider",
+        "min": 0,
+        "max": 1,
+        "value": 0.7
+      },
+      "semantictextdegradationstrength": {
+        "order": 62,
+        "text": "Semantic text degradation",
+        "type": "slider",
+        "min": 0,
+        "max": 1,
+        "value": 0.6
+      },
+      "semantictextlanguageprofile": {
+        "order": 63,
+        "text": "Semantic text profile",
+        "type": "combo",
+        "value": "engineering",
+        "options": [
+          { "value": "engineering", "label": "Engineering" },
+          { "value": "broken", "label": "Broken" },
+          { "value": "alien-heavy", "label": "Alien-heavy" }
+        ]
+      },
+      "semantictextidlemode": {
+        "order": 64,
+        "text": "Semantic text idle mode",
+        "type": "bool",
+        "value": true
+      },
+      "logenabled": {
+        "order": 65,
+        "text": "Log enabled",
+        "type": "bool",
+        "value": true
+      },
+      "logmaxentries": {
+        "order": 66,
+        "text": "Log max entries",
+        "type": "slider",
+        "min": 50,
+        "max": 500,
+        "value": 300
+      },
+      "logshowtimestamp": {
+        "order": 67,
+        "text": "Log show timestamps",
+        "type": "bool",
+        "value": true
+      },
+      "logfontscale": {
+        "order": 68,
+        "text": "Log font scale",
+        "type": "slider",
+        "min": 0.8,
+        "max": 1.6,
+        "value": 1.2
+      },
+      "logpersistbetweensessions": {
+        "order": 69,
+        "text": "Log persist between sessions",
+        "type": "bool",
+        "value": true
+      }
+    }
+  }
+}

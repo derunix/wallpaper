@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neon Circuit HUD Wallpaper</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="bg-canvas"></canvas>
+  <canvas id="fg-canvas"></canvas>
+  <div id="glitch-layer" aria-hidden="true"></div>
+
+  <div id="hud-overlay" class="layout-left">
+    <div class="panel now-playing area-now" id="panel-nowplaying">
+      <div class="panel-title" id="title-nowplaying">NOW PLAYING</div>
+      <div class="panel-body">
+        <div class="now-playing-main">
+          <div class="cover" id="cover"></div>
+          <div class="track-info">
+            <div class="track-title" id="track-title" data-glitch="1">--</div>
+            <div class="track-artist" id="track-artist">--</div>
+            <div class="track-status" id="track-status">--</div>
+          </div>
+        </div>
+        <div class="system-text-panel" id="system-text-panel">
+          <div class="system-text-title" id="title-system-text">SYSTEM TEXT</div>
+          <div class="system-text-body" id="system-text" data-glitch="1">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel weather area-weather" id="panel-weather">
+      <div class="panel-title" id="title-weather">WEATHER</div>
+      <div class="panel-body">
+        <div class="weather-main">
+          <div class="weather-icon" id="weather-icon"></div>
+          <div class="temp" id="weather-temp" data-glitch="1">--°</div>
+          <div class="city" id="weather-city">Tbilisi</div>
+          <div class="cond" id="weather-cond">--</div>
+        </div>
+        <div class="weather-forecast" id="weather-forecast"></div>
+      </div>
+    </div>
+
+    <div class="panel clock area-clock" id="panel-clock">
+      <div class="panel-title" id="title-clock">LOCAL TIME</div>
+      <div class="panel-body clock-body">
+        <div class="time" id="clock-time" data-glitch="1">--:--</div>
+        <div class="date" id="clock-date">-- -- ----</div>
+        <div class="calendar">
+          <div class="calendar-header" id="calendar-header">--</div>
+          <div class="calendar-grid" id="calendar-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel performance area-metrics" id="panel-performance">
+      <div class="panel-title" id="title-metrics">SYSTEM LOAD</div>
+      <div class="metrics-list" id="metrics-list">
+        <div class="metric-row" data-key="cpu">
+          <div class="metric-label">
+            <div class="name" id="label-cpu">CPU</div>
+            <div class="sub" id="cpu-temp">--</div>
+          </div>
+          <div class="gauge">
+            <div class="gauge-track"><span id="cpu-bar"></span></div>
+            <div class="gauge-value" id="cpu-value" data-glitch="1">--%</div>
+          </div>
+          <div class="core-bars" id="cpu-cores"></div>
+        </div>
+        <div class="metric-row" data-key="gpu">
+          <div class="metric-label">
+            <div class="name" id="label-gpu">GPU</div>
+            <div class="sub" id="gpu-temp">--</div>
+          </div>
+          <div class="gauge">
+            <div class="gauge-track"><span id="gpu-bar"></span></div>
+            <div class="gauge-value" id="gpu-value" data-glitch="1">--%</div>
+          </div>
+        </div>
+        <div class="metric-row" data-key="ram">
+          <div class="metric-label">
+            <div class="name" id="label-ram">RAM</div>
+            <div class="sub" id="ram-extra">--</div>
+          </div>
+          <div class="gauge">
+            <div class="gauge-track"><span id="ram-bar"></span></div>
+            <div class="gauge-value" id="ram-value" data-glitch="1">--%</div>
+          </div>
+        </div>
+        <div class="metric-row" data-key="vram">
+          <div class="metric-label">
+            <div class="name" id="label-vram">VRAM</div>
+            <div class="sub" id="vram-extra">--</div>
+          </div>
+          <div class="gauge">
+            <div class="gauge-track"><span id="vram-bar"></span></div>
+            <div class="gauge-value" id="vram-value" data-glitch="1">--%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel network area-network" id="panel-network">
+      <div class="panel-title" id="title-network">NETWORK</div>
+      <div class="net-row">
+        <div class="net-item">
+          <div class="label" id="label-down">DOWN</div>
+          <div class="value" id="net-down" data-glitch="1">--</div>
+        </div>
+        <div class="net-item">
+          <div class="label" id="label-up">UP</div>
+          <div class="value" id="net-up" data-glitch="1">--</div>
+        </div>
+        <div class="net-item">
+          <div class="label" id="label-ip">IP</div>
+          <div class="value" id="net-ip">--</div>
+        </div>
+      </div>
+      <div class="net-meta">
+        <div class="net-status" id="hw-status">--</div>
+        <div class="net-update" id="hw-update">--</div>
+      </div>
+    </div>
+
+    <div class="panel disks area-disks" id="panel-disks">
+      <div class="panel-title" id="title-disks">DISKS</div>
+      <div class="disk-row">
+        <div class="label" id="label-disk-c">DISK C:</div>
+        <div class="value" id="disk-c">--</div>
+      </div>
+      <div class="disk-row">
+        <div class="label" id="label-disk-d">DISK D:</div>
+        <div class="value" id="disk-d">--</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="globalOverlay" class="overlay hidden" aria-hidden="true">
+    <div class="overlayTitle" id="overlayTitle"></div>
+    <div class="overlaySubtitle" id="overlaySubtitle"></div>
+    <div class="overlayBar">
+      <div class="overlayBarFill" id="overlayBarFill"></div>
+    </div>
+  </div>
+
+  <div id="debug-overlay" hidden></div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
+
