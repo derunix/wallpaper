@@ -29,8 +29,16 @@ export class GlitchSystem {
     this.manager.setConfig(config);
   }
 
+  setMoodMultipliers(multipliers) {
+    this.manager.setMoodMultipliers(multipliers);
+  }
+
   triggerBigEvent() {
     this.manager.triggerBigEvent();
+  }
+
+  triggerLocal(options = {}) {
+    return this.manager.triggerLocal(this.audioDriver.getState(), options);
   }
 
   getAudioState() {
@@ -39,5 +47,10 @@ export class GlitchSystem {
 
   getDebugInfo() {
     return this.manager.getDebugInfo();
+  }
+
+  reset() {
+    this.audioDriver.reset?.();
+    this.manager.reset();
   }
 }

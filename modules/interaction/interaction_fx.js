@@ -84,6 +84,39 @@ export class InteractionFX {
     this.blockElements = blockElements;
   }
 
+  resetTransient(options = {}) {
+    const keepPins = options.keepPins ?? true;
+    const keepDetail = options.keepDetail ?? true;
+    this.hovered = null;
+    this.hoverAlpha = 0;
+    this.hoverInterest = 0;
+    this.edgeProximity = 0;
+    this.hoverScan = null;
+    this.hoverHold = 0;
+    this.hoverHoldTriggered = false;
+    this.holdTime = 0;
+    this.holdBlock = null;
+    this.holdTriggered = false;
+    this.suppressClickUntil = 0;
+    this.trail = [];
+    this.pings = [];
+    this.ripples = [];
+    this.waveRipples = [];
+    this.symbols = [];
+    this.sparks = [];
+    this.focusZoom = [];
+    this.clickBurst = [];
+    this.motionSamples = [];
+    this.motionBlock = null;
+    this.contextMenu = null;
+    this.bigEvents = [];
+    this.parallax = { x: 0, y: 0 };
+    this.nextBigEventAt = performance.now() + randRange(24000, 52000);
+    this.lastBigEventAt = 0;
+    if (!keepPins) this.pinned = new Set();
+    if (!keepDetail) this.detailLevel = {};
+  }
+
   triggerPulse(blockId, intensity = 1) {
     const rect = this.blocks[blockId]?.rect;
     if (!rect) return;

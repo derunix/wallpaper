@@ -49,26 +49,39 @@ export function buildCalendarData(date, locale = 'en-US', offset = 0) {
   };
 }
 
+export function getCalendarHover(rect, data, options = {}, x, y) {
+  if (!rect || !data || !isFinite(x) || !isFinite(y)) return null;
+  const layout = getCalendarLayout(rect, options);
+  if (!layout) return null;
+  const { gridX, gridY, cellW, cellH, gridW, gridH } = layout;
+  if (x < gridX || y < gridY || x > gridX + gridW || y > gridY + gridH) return null;
+  const col = Math.floor((x - gridX) / cellW);
+  const row = Math.floor((y - gridY) / cellH);
+  if (col < 0 || col > 6 || row < 0 || row > 5) return null;
+  const cell = data.weeks?.[row]?.[col];
+  return { row, col, cell };
+}
+
 export function renderCalendar(ctx, rect, data, options = {}) {
   if (!rect || !data) return;
-  const scale = clamp(options.textScale ?? 1, 0.8, 1.6);
-  const padding = clamp(rect.h * 0.04, 8, 24);
-  const headerH = clamp(rect.h * 0.18, 34, 70);
-  const dowH = clamp(rect.h * 0.1, 20, 42);
-  const gridH = rect.h - padding * 2 - headerH - dowH;
-  if (gridH <= 0) return;
+  const layout = getCalendarLayout(rect, options);
+  if (!layout) return;
+  const { scale, padding, headerH, dowH, gridX, gridY, cellW, cellH, showGrid } = layout;
+  const hover = options.hover || null;
+  const hoverRow = hover?.row ?? -1;
+  const hoverCol = hover?.col ?? -1;
 
-  const cellH = Math.max(1, Math.floor(gridH / 6));
-  const cellW = Math.max(1, Math.floor((rect.w - padding * 2) / 7));
   const dayFont = clamp(Math.floor(cellH * 0.46 * scale), 14, 36);
   const dowFont = clamp(Math.floor(cellH * 0.28 * scale), 10, 22);
   const monthFont = clamp(Math.floor(headerH * 0.55 * scale), 16, 42);
-  const showGrid = cellH >= 22 && cellW >= 24;
 
   const colors = options.colors || {};
-  const primary = colors.primary || 'rgba(141, 252, 79, 0.9)';
-  const secondary = colors.secondary || 'rgba(63, 231, 255, 0.75)';
-  const text = options.textColor || 'rgba(232, 255, 247, 0.85)';
+  const primary = colors.primary || 'rgba(141, 252, 79, 0.95)';
+  const secondary = colors.secondary || 'rgba(63, 231, 255, 0.9)';
+  const text = options.textColor || 'rgba(232, 255, 247, 0.92)';
+  const highlight = 'rgba(63, 231, 255, 0.22)';
+  const weekendFill = 'rgba(141, 252, 79, 0.18)';
+  const hoverFill = 'rgba(141, 252, 79, 0.24)';
 
   ctx.save();
   ctx.beginPath();
@@ -89,10 +102,15 @@ export function renderCalendar(ctx, rect, data, options = {}) {
     ctx.fillText(data.weekdays[i] || '', x, dowY);
   }
 
-  const gridX = rect.x + padding;
-  const gridY = rect.y + padding + headerH + dowH;
   ctx.font = `700 ${dayFont}px Orbitron, Oxanium, sans-serif`;
   ctx.textBaseline = 'middle';
+
+  if (hoverRow >= 0 && hoverRow < 6) {
+    ctx.save();
+    ctx.fillStyle = highlight;
+    ctx.fillRect(gridX + 1, gridY + hoverRow * cellH + 1, cellW * 7 - 2, cellH - 2);
+    ctx.restore();
+  }
 
   for (let row = 0; row < data.weeks.length; row++) {
     const week = data.weeks[row];
@@ -104,30 +122,75 @@ export function renderCalendar(ctx, rect, data, options = {}) {
 
       if (cell.weekend) {
         ctx.save();
-        ctx.fillStyle = 'rgba(141, 252, 79, 0.12)';
+        ctx.fillStyle = weekendFill;
         ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+        ctx.restore();
+      }
+
+      if (row === hoverRow && col === hoverCol) {
+        ctx.save();
+        ctx.fillStyle = hoverFill;
+        ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+        ctx.strokeStyle = primary;
+        ctx.lineWidth = Math.max(1.5, (options.lineWidth || 2) * 0.8);
+        ctx.strokeRect(x + 1.5, y + 1.5, cellW - 3, cellH - 3);
         ctx.restore();
       }
 
       if (cell.today) {
         ctx.save();
         ctx.strokeStyle = primary;
-        ctx.lineWidth = Math.max(1, (options.lineWidth || 2) * 0.7);
+        ctx.lineWidth = Math.max(1.5, (options.lineWidth || 2) * 0.85);
         ctx.strokeRect(x + 1.5, y + 1.5, cellW - 3, cellH - 3);
         ctx.restore();
       } else if (showGrid) {
         ctx.save();
-        ctx.strokeStyle = 'rgba(63, 231, 255, 0.18)';
+        ctx.strokeStyle = 'rgba(63, 231, 255, 0.28)';
         ctx.lineWidth = 1;
         ctx.strokeRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
         ctx.restore();
       }
 
-      ctx.fillStyle = cell.today ? primary : cell.weekend ? 'rgba(141, 252, 79, 0.85)' : text;
+      ctx.fillStyle = cell.today
+        ? primary
+        : cell.weekend
+        ? 'rgba(141, 252, 79, 0.9)'
+        : row === hoverRow && col === hoverCol
+        ? primary
+        : text;
       ctx.textAlign = 'center';
       ctx.fillText(String(cell.day), x + cellW / 2, y + cellH / 2 + 1);
     }
   }
 
   ctx.restore();
+}
+
+function getCalendarLayout(rect, options = {}) {
+  if (!rect) return null;
+  const scale = clamp(options.textScale ?? 1, 0.8, 1.6);
+  const padding = clamp(rect.h * 0.04, 8, 24);
+  const headerH = clamp(rect.h * 0.18, 34, 70);
+  const dowH = clamp(rect.h * 0.1, 20, 42);
+  const gridH = rect.h - padding * 2 - headerH - dowH;
+  if (gridH <= 0) return null;
+  const cellH = Math.max(1, Math.floor(gridH / 6));
+  const cellW = Math.max(1, Math.floor((rect.w - padding * 2) / 7));
+  const showGrid = cellH >= 22 && cellW >= 24;
+  const gridX = rect.x + padding;
+  const gridY = rect.y + padding + headerH + dowH;
+  const gridW = cellW * 7;
+  return {
+    scale,
+    padding,
+    headerH,
+    dowH,
+    gridX,
+    gridY,
+    gridW,
+    gridH,
+    cellW,
+    cellH,
+    showGrid,
+  };
 }

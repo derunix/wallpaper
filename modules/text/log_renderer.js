@@ -8,8 +8,14 @@ export class LogRenderer {
       showTimestamp: true,
       locale: 'en-US',
       fontFamily: 'Orbitron, Oxanium, sans-serif',
-      color: 'rgba(232, 255, 247, 0.85)',
-      secondary: 'rgba(63, 231, 255, 0.55)',
+      color: 'rgba(245, 255, 252, 0.98)',
+      secondary: 'rgba(125, 255, 214, 0.7)',
+      shadowColor: 'rgba(0, 0, 0, 0.6)',
+      shadowBlur: 6,
+      shadowOffsetX: 0,
+      shadowOffsetY: 1,
+      strokeColor: 'rgba(0, 0, 0, 0.5)',
+      strokeWidth: 1,
       headerInset: 0,
       ...options,
     };
@@ -33,7 +39,6 @@ export class LogRenderer {
     const fontSize = clamp(Math.floor(14 * textScale * fontScale), 12, 28);
     const lineHeight = Math.max(16, Math.floor(fontSize * 1.35));
     const maxLines = Math.max(1, Math.floor(usableH / lineHeight));
-    const slice = entries.slice(-maxLines);
 
     const displayState = cfg.displayState || {};
     const jitter = clamp(displayState.jitter ?? 0, 0, 2.5);
@@ -53,22 +58,45 @@ export class LogRenderer {
     const bottomY = rect.y + rect.h - padding;
     const width = rect.w - padding * 2;
 
-    for (let i = 0; i < slice.length; i++) {
-      const entry = slice[slice.length - 1 - i];
+    const lines = this._buildLines(ctx, entries, cfg, width, maxLines);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const y = bottomY - i * lineHeight;
       const fade = 1 - i / Math.max(1, maxLines - 1);
-      const alpha = clamp(0.35 + 0.65 * fade, 0.2, 1) * (0.85 + (1 - level) * 0.15);
+      const alpha = clamp(0.45 + 0.55 * fade, 0.35, 1) * (0.92 + (1 - level) * 0.08);
       const jitterX = jitter > 0 ? (Math.random() - 0.5) * jitter : 0;
       const jitterY = jitter > 0 ? (Math.random() - 0.5) * jitter * 0.35 : 0;
       const flickerAlpha = flicker > 0 ? clamp(0.8 + (Math.random() - 0.5) * flicker * 0.4, 0.6, 1) : 1;
       ctx.globalAlpha = alpha * flickerAlpha;
       ctx.fillStyle = cfg.color;
-      const text = this._formatLine(entry, cfg);
-      const trimmed = this._truncate(ctx, text, width);
-      ctx.fillText(trimmed, baseX + jitterX, y + jitterY);
+      ctx.shadowColor = cfg.shadowColor || 'rgba(0, 0, 0, 0.6)';
+      ctx.shadowBlur = cfg.shadowBlur ?? 6;
+      ctx.shadowOffsetX = cfg.shadowOffsetX ?? 0;
+      ctx.shadowOffsetY = cfg.shadowOffsetY ?? 1;
+      if (cfg.strokeWidth && cfg.strokeWidth > 0) {
+        ctx.lineWidth = cfg.strokeWidth;
+        ctx.strokeStyle = cfg.strokeColor || 'rgba(0, 0, 0, 0.5)';
+        ctx.strokeText(line, baseX + jitterX, y + jitterY);
+      }
+      ctx.fillText(line, baseX + jitterX, y + jitterY);
     }
 
     ctx.restore();
+  }
+
+  _buildLines(ctx, entries, cfg, width, maxLines) {
+    if (!entries || !entries.length) return [];
+    const lines = [];
+    for (let idx = entries.length - 1; idx >= 0; idx--) {
+      const entry = entries[idx];
+      const text = this._formatLine(entry, cfg);
+      const wrapped = this._wrapLine(ctx, text, width);
+      for (let i = wrapped.length - 1; i >= 0; i--) {
+        lines.push(wrapped[i]);
+        if (lines.length >= maxLines) return lines;
+      }
+    }
+    return lines;
   }
 
   _formatLine(entry, cfg) {
@@ -84,13 +112,46 @@ export class LogRenderer {
     return `[${stamp}] ${raw}`;
   }
 
-  _truncate(ctx, text, maxWidth) {
-    if (!text) return '';
-    if (ctx.measureText(text).width <= maxWidth) return text;
-    let truncated = text;
-    while (truncated.length > 4 && ctx.measureText(`${truncated}...`).width > maxWidth) {
-      truncated = truncated.slice(0, -1);
+  _wrapLine(ctx, text, maxWidth) {
+    if (!text) return [];
+    if (ctx.measureText(text).width <= maxWidth) return [text];
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines = [];
+    let current = '';
+    words.forEach(word => {
+      const candidate = current ? `${current} ${word}` : word;
+      if (ctx.measureText(candidate).width <= maxWidth) {
+        current = candidate;
+        return;
+      }
+      if (current) lines.push(current);
+      if (ctx.measureText(word).width <= maxWidth) {
+        current = word;
+        return;
+      }
+      const split = this._breakWord(ctx, word, maxWidth);
+      split.forEach(part => {
+        if (current) lines.push(current);
+        current = part;
+      });
+    });
+    if (current) lines.push(current);
+    return lines;
+  }
+
+  _breakWord(ctx, word, maxWidth) {
+    const parts = [];
+    let chunk = '';
+    for (let i = 0; i < word.length; i++) {
+      const next = chunk + word[i];
+      if (ctx.measureText(next).width <= maxWidth || !chunk) {
+        chunk = next;
+      } else {
+        parts.push(chunk);
+        chunk = word[i];
+      }
     }
-    return `${truncated}...`;
+    if (chunk) parts.push(chunk);
+    return parts;
   }
 }

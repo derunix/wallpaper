@@ -40,4 +40,8 @@ export class OverlayMessages {
     ctx.fillText(msg.text, width / 2, height * 0.12);
     ctx.restore();
   }
+
+  reset() {
+    this.messages = [];
+  }
 }

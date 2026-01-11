@@ -64,6 +64,12 @@ export class MicroAnimations {
     }
   }
 
+  reset() {
+    this.prev = {};
+    this.markers = [];
+    this.lastAlertAt = 0;
+  }
+
   update(dt) {
     this.markers.forEach(marker => {
       marker.life -= dt;

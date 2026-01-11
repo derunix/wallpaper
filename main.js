@@ -1,8 +1,8 @@
 import { AudioEngine, registerWallpaperAudio } from './modules/audio.js';
-import { drawBackground, drawForeground } from './modules/hud.js';
 import { NowPlayingService } from './modules/nowplaying.js';
-import { WeatherService } from './modules/weather.js';
-import { PerformanceMonitor } from './modules/performance.js';
+import { WeatherService } from './modules/services/weather_service.js';
+import { PerfService } from './modules/services/perf_service.js';
+import { ExternalIpService } from './modules/services/ip_service.js';
 import { AudioDriver } from './modules/audio/audio_driver.js';
 import { GlitchSystem } from './modules/glitch/index.js';
 import { DEFAULT_SYMBOL_SET } from './modules/glitch/text_scramble.js';
@@ -20,10 +20,25 @@ import { CoreStateMachine } from './modules/core/state_machine.js';
 import { NarrativeEngine } from './modules/core/narrative_engine.js';
 import { TimeContext } from './modules/utils/time_context.js';
 import { loadState, saveState } from './modules/utils/persistence.js';
-import { SemanticEngine } from './modules/text/semantic_engine.js';
+import { SemanticEngine } from './modules/text_ai/semantic_engine.js';
+import { MusicContext } from './modules/text/music_context.js';
 import { LogBuffer } from './modules/text/log_buffer.js';
 import { LogRenderer } from './modules/text/log_renderer.js';
-import { buildCalendarData, renderCalendar as renderCalendarCanvas } from './modules/ui/render_calendar.js';
+import { buildCalendarData, getCalendarHover } from './modules/ui/render_calendar.js';
+import { PerfProfiler } from './modules/core/perf_profiler.js';
+import { fetchTracker } from './modules/core/fetch_tracker.js';
+import { allocationDetector } from './modules/core/allocation_detector.js';
+import { Scheduler } from './modules/core/scheduler.js';
+import { createStateStore } from './modules/core/state_store.js';
+import { MainLoop } from './modules/core/main_loop.js';
+import { runSelfChecks } from './modules/core/self_checks.js';
+import { CORE_CONFIG } from './modules/core/config.js';
+import { settings } from './settings.js';
+import { installWallpaperPropertyListener } from './we_properties.js';
+import { HudRenderer } from './modules/render/hud_renderer.js';
+import { TextRenderer } from './modules/render/text_renderer.js';
+import { FxRenderer } from './modules/render/fx_renderer.js';
+import { computeHudLayout, applyHudCssVars, computeBlockRegistry, getElementRect } from './modules/render/layout.js';
 import {
   setupHiDPICanvas,
   clamp,
@@ -43,7 +58,6 @@ const hudCanvas = document.createElement('canvas');
 const trackTitleEl = document.getElementById('track-title');
 const trackArtistEl = document.getElementById('track-artist');
 const trackStatusEl = document.getElementById('track-status');
-const coverEl = document.getElementById('cover');
 const systemTextPanelEl = document.getElementById('system-text-panel');
 const systemTextEl = document.getElementById('system-text');
 const systemTextTitleEl = document.getElementById('title-system-text');
@@ -131,8 +145,6 @@ const labelEls = {
 
 let bgCtx, fgCtx, hudCtx, dimensions;
 let clockTimer = null;
-let ipTimer = null;
-let lastCoverSrc = null;
 let lastTrackKey = null;
 let blocks = {};
 let blockLabels = {};
@@ -140,7 +152,6 @@ let textTargets = [];
 let lastPerfOnline = null;
 let lastMetrics = null;
 let calendarOffset = 0;
-let lastFrame = performance.now();
 let profileOverride = null;
 let glitchUpdateTimer = 0;
 let logDisplayState = { level: 0, jitter: 0, flicker: 0 };
@@ -155,11 +166,42 @@ let lastWeatherSignature = null;
 let lastDiskUsage = { c: null, d: null };
 let lastNetDown = null;
 let lastBigEventActive = false;
+let lastBigEventAt = 0;
 let lastLongIdleAt = 0;
 let calendarData = null;
 const jitterTimers = new WeakMap();
+let glitchVisual = { intensity: 0, target: 0 };
+let calendarHover = null;
+let mainLoop = null;
+let renderLoopActive = false;
+let lastOkTs = performance.now();
+let lastFrameDelta = 0;
+let frameCounter = 0;
+let fpsSample = { acc: 0, count: 0, lastStamp: performance.now(), fps: 60 };
+let watchdogTimer = null;
+let softResetCount = 0;
+let lastSoftResetAt = 0;
+let softResetInProgress = false;
+let lastSoftResetReason = 'none';
+const WATCHDOG_INTERVAL_MS = CORE_CONFIG.watchdogIntervalMs;
+const WATCHDOG_STALL_MS = CORE_CONFIG.watchdogStallMs;
+const frameState = {
+  now: 0,
+  dt: 0,
+  audioAgg: null,
+  timeState: null,
+  musicState: null,
+  glitchDebug: null,
+  bigEventActive: false,
+  lastBigEventAgeSec: 0,
+  hit: null,
+  inputState: null,
+  coreState: null,
+  entropy: 0,
+  calendarHover: null,
+};
 
-const state = {
+const stateStore = createStateStore({
   colors: {
     background: '#04070a',
     primary: '#8dfc4f',
@@ -204,11 +246,25 @@ const state = {
     glitchIntervalMaxSec: 20,
     glitchIntensity: 1,
     musicReactiveGlitches: true,
+    localGlitchesEnabled: true,
+    localGlitchIntervalMinSec: 6,
+    localGlitchIntervalMaxSec: 16,
+    localGlitchIntensityBoost: 1,
+    localGlitchFrequencyBoost: 1,
+    allowTwoBlockGlitches: true,
+    electricEffectsEnabled: true,
+    electricIntensity: 1.2,
+    electricArcCooldown: 20,
+    electricLadderSpeed: 1,
+    electricAudioReactive: true,
+    maxSimultaneousLocal: 2,
     maxSimultaneousGlitches: 2,
     allowScreenWideEffects: true,
     bigEventChance: 0.2,
     chromaticAberrationEnabled: true,
-    alienAlphabetStrength: 0.7,
+    themePrimary: '#8dfc4f',
+    themeSecondary: '#3fe7ff',
+    alienAlphabetStrength: 1,
     alienSymbolSet: DEFAULT_SYMBOL_SET,
     debugGlitchOverlay: false,
   },
@@ -224,6 +280,7 @@ const state = {
     uiResponsiveness: 1,
     tooltipsEnabled: false,
     diagnosticsEnabled: false,
+    perfProfilerEnabled: false,
   },
   log: {
     enabled: true,
@@ -240,6 +297,21 @@ const state = {
     degradationStrength: 0.6,
     languageProfile: 'engineering',
     idleMode: true,
+    textModeStrategy: 'auto',
+    smartCandidateCount: 40,
+    degradationSensitivity: 1,
+    robotModeThreshold: 1,
+    apologyEnabled: true,
+    preemptiveWarnings: true,
+    whiningIntensity: 1.2,
+    alienAlphabetStrength: 1,
+    debugTextAI: false,
+  },
+  mood: {
+    reactiveText: true,
+    reactiveVisuals: true,
+    aggressiveness: 1,
+    debug: false,
   },
   layerOffsets: {
     grid: { x: 0, y: 0 },
@@ -270,7 +342,8 @@ const state = {
     ip: null,
   },
   hudLayout: null,
-};
+});
+const state = stateStore.state;
 
 const PROFILE_STORAGE_KEY = 'hud_profile_v1';
 const persistedProfile = loadState(PROFILE_STORAGE_KEY, null);
@@ -423,7 +496,7 @@ const I18N = {
         playing: 'ИГРАЕТ',
         paused: 'ПАУЗА',
         stopped: 'СТОП',
-        idle: 'ОЖИДАНИЕ',
+        idle: '',
       },
     },
     weather: {
@@ -535,6 +608,11 @@ const logRenderer = new LogRenderer({
   showTimestamp: state.log.showTimestamp,
   locale: state.language,
 });
+const textRenderer = new TextRenderer(logRenderer);
+const fxCanvas = document.createElement('canvas');
+const hudRenderer = new HudRenderer(bgCanvas, hudCanvas);
+hudRenderer.setTextCanvas(textRenderer.canvas);
+const fxRenderer = new FxRenderer(fxCanvas);
 
 const eventBus = new EventBus();
 const audioDriver = new AudioDriver();
@@ -557,8 +635,19 @@ const semanticEngine = new SemanticEngine({
   degradationStrength: state.semanticText.degradationStrength,
   languageProfile: state.semanticText.languageProfile,
   idleMode: state.semanticText.idleMode,
+  textModeStrategy: state.semanticText.textModeStrategy,
+  smartCandidateCount: state.semanticText.smartCandidateCount,
+  degradationSensitivity: state.semanticText.degradationSensitivity,
+  robotModeThreshold: state.semanticText.robotModeThreshold,
+  apologyEnabled: state.semanticText.apologyEnabled,
+  preemptiveWarnings: state.semanticText.preemptiveWarnings,
+  whiningIntensity: state.semanticText.whiningIntensity,
+  alienAlphabetStrength: state.semanticText.alienAlphabetStrength,
+  debugTextAI: state.semanticText.debugTextAI,
+  moodReactiveText: state.mood.reactiveText,
   language: state.language,
 });
+const musicContext = new MusicContext();
 const inputManager = new InputManager(window, { idleTimeoutSec: state.interactivity.idleTimeoutSec });
 const interactionFX = new InteractionFX(eventBus, {
   ...state.interactivity,
@@ -569,6 +658,7 @@ const stateMachine = new InteractionStateMachine(eventBus, { idleTimeoutSec: sta
 const microAnimations = new MicroAnimations(eventBus, state.thresholds, { textScale: state.textScale });
 const overlayMessages = new OverlayMessages(eventBus, resolveMessageKey);
 const diagnostics = new DiagnosticsMode(eventBus, debugOverlay);
+const perfProfiler = new PerfProfiler({ logIntervalMs: CORE_CONFIG.perfLogIntervalMs });
 
 const glitchSystem = new GlitchSystem(state.glitchConfig, blocks, blockLabels, textTargets);
 
@@ -577,27 +667,62 @@ registerWallpaperAudio(audioEngine, arr => {
   audioDriver.onAudioFrame(arr);
 });
 
-const weatherService = new WeatherService(
-  { provider: 'open-meteo', units: state.units },
-  updateWeatherUI
-);
-const perfMonitor = new PerformanceMonitor('http://127.0.0.1:5000/performance', updatePerfUI, 5);
+const scheduler = new Scheduler();
+const weatherService = new WeatherService({ provider: 'open-meteo', units: state.units }, updateWeatherUI);
+const perfService = new PerfService('http://127.0.0.1:5000/performance', updatePerfUI);
+const ipService = new ExternalIpService(updateExternalIpUI);
 const nowPlayingService = new NowPlayingService(updateNowPlayingUI);
+
+const schedulerTasks = {
+  weather: scheduler.addTask('weather', {
+    intervalMs: weatherService.options.refreshMinutes * 60 * 1000,
+    jitterMs: 60000,
+    handler: () =>
+      weatherService.fetch().catch(err => {
+        updateWeatherUI(weatherService.getCache());
+        throw err;
+      }),
+  }),
+  perf: scheduler.addTask('perf', {
+    intervalMs: 5000,
+    jitterMs: 500,
+    handler: () =>
+      perfService.fetch().catch(err => {
+        perfService.fail();
+        throw err;
+      }),
+  }),
+  ip: scheduler.addTask('ip', {
+    intervalMs: 45 * 60 * 1000,
+    jitterMs: 5 * 60 * 1000,
+    handler: () =>
+      ipService
+        .fetch()
+        .then(data => {
+          state.cache.ip = data;
+          return data;
+        })
+        .catch(err => {
+          state.cache.ip = null;
+          updateExternalIpUI(null);
+          throw err;
+        }),
+  }),
+};
 
 function init() {
   resize();
   window.addEventListener('resize', resize);
 
   setTextScale(state.textScale);
-  setCoverPlaceholder();
   resetSystemText();
-
-  weatherService.start();
-  perfMonitor.start();
+  scheduler.setEnabled('weather', state.weatherEnabled);
+  scheduler.setEnabled('perf', true);
+  scheduler.setEnabled('ip', state.externalIpEnabled);
   applyLanguage();
   applyVisualProfile(state.visualProfile);
   setupClockTimer();
-  startExternalIp();
+  updateExternalIpUI(state.cache.ip, !state.externalIpEnabled);
 
   updateDiagnosticsMode();
 
@@ -630,8 +755,10 @@ function init() {
   });
   window.addEventListener('beforeunload', () => logBuffer.flush());
 
-  // Kick off render loop
-  requestAnimationFrame(loop);
+  runSelfChecks({ semanticEngine });
+
+  startWatchdog();
+  startRenderLoop();
 }
 
 function getStrings() {
@@ -651,8 +778,34 @@ function resolveMessageKey(key) {
 function updateDiagnosticsMode() {
   const showInput = state.interactivity.diagnosticsEnabled;
   const showGlitch = state.glitchConfig.debugGlitchOverlay;
-  diagnostics.setMode({ showInput, showGlitch });
-  diagnostics.setEnabled(showInput || showGlitch);
+  const showMood = state.mood.debug;
+  const showTextAI = state.semanticText.debugTextAI;
+  const showPerf = state.interactivity.perfProfilerEnabled || state.interactivity.diagnosticsEnabled;
+  diagnostics.setMode({ showInput, showGlitch, showMood, showTextAI, showPerf });
+  diagnostics.setEnabled(showInput || showGlitch || showMood || showTextAI || showPerf);
+  perfProfiler.setEnabled(showPerf);
+  allocationDetector.setEnabled(showPerf);
+}
+
+function resolveMoodMultipliers(moodClass = 'steady', aggressiveness = 1) {
+  const agg = clamp(aggressiveness, 0.5, 2);
+  const base = {
+    calm: { freqMul: 0.8, intensityMul: 0.88, bigEventBoost: 0 },
+    steady: { freqMul: 1, intensityMul: 1, bigEventBoost: 0 },
+    tense: { freqMul: 1.15, intensityMul: 1.12, bigEventBoost: 0.08 },
+    chaotic: { freqMul: 1.35, intensityMul: 1.28, bigEventBoost: 0.14 },
+  }[moodClass] || { freqMul: 1, intensityMul: 1, bigEventBoost: 0 };
+
+  const freqMul = clamp(1 + (base.freqMul - 1) * agg, 0.7, 1.6);
+  const intensityMul = clamp(1 + (base.intensityMul - 1) * agg, 0.8, 1.5);
+  const bigEventBoost = clamp((base.bigEventBoost || 0) * agg, 0, 0.3);
+
+  return {
+    freqMul,
+    intensityMul,
+    bigEventBoost,
+    chaotic: moodClass === 'chaotic',
+  };
 }
 
 function setText(el, value) {
@@ -751,6 +904,7 @@ function applyVisualProfile(profile, options = {}) {
   document.documentElement.style.setProperty('--grid-alpha', `${preset.gridAlpha}`);
   document.documentElement.style.setProperty('--bg-eq-alpha', `${state.bgEQAlpha}`);
   interactionFX.setConfig({ uiResponsiveness: state.interactivity.uiResponsiveness * preset.responseScale });
+  stateStore.markDirty(['hudStatic', 'text']);
 }
 
 function cycleProfile() {
@@ -765,41 +919,6 @@ function setupClockTimer() {
   const interval = state.showSeconds ? 500 : 1000;
   clockTimer = setInterval(updateClock, interval);
   updateClock(true);
-}
-
-function startExternalIp() {
-  stopExternalIp();
-  if (!state.externalIpEnabled) {
-    updateExternalIpUI(null, true);
-    return;
-  }
-  fetchExternalIp();
-}
-
-function stopExternalIp() {
-  if (ipTimer) clearTimeout(ipTimer);
-  ipTimer = null;
-}
-
-async function fetchExternalIp() {
-  if (!state.externalIpEnabled) return;
-  try {
-    const res = await fetch('https://api.ipify.org?format=json', { cache: 'no-store' });
-    if (!res.ok) throw new Error('ip fetch failed');
-    const data = await res.json();
-    state.cache.ip = { value: data.ip, fetchedAt: Date.now() };
-    updateExternalIpUI(state.cache.ip);
-    scheduleExternalIp(20 * 60 * 1000);
-  } catch (err) {
-    state.cache.ip = null;
-    updateExternalIpUI(null);
-    scheduleExternalIp(10 * 60 * 1000);
-  }
-}
-
-function scheduleExternalIp(delayMs) {
-  if (ipTimer) clearTimeout(ipTimer);
-  ipTimer = setTimeout(fetchExternalIp, delayMs);
 }
 
 function updateExternalIpUI(ipData, disabled = false) {
@@ -980,6 +1099,35 @@ function updateGlitchRuntime(dt, entropy, mods = {}) {
   });
 }
 
+function updateGlitchVisual(dt, glitchDebug, audioAgg, bigEventActive) {
+  const root = document.documentElement;
+  if (!state.glitchConfig.glitchesEnabled) {
+    glitchVisual.intensity = Math.max(0, glitchVisual.intensity - dt * 3);
+    root.style.setProperty('--glitch-intensity', glitchVisual.intensity.toFixed(3));
+    document.body.classList.toggle('glitch-active', glitchVisual.intensity > 0.05);
+    return;
+  }
+
+  const activeCount = glitchDebug?.active?.length || 0;
+  const meta = glitchDebug?.activeMeta || [];
+  const hasScreen = meta.some(entry => entry.category === 'screen');
+  const hasBig = bigEventActive || meta.some(entry => entry.category === 'big');
+  const audioEnergy = clamp(audioAgg?.energy || 0, 0, 1);
+  const audioBoost = audioEnergy * 0.35 + (audioAgg?.peak ? 0.55 : 0);
+  const activityBoost = activeCount * 0.25 + (hasScreen ? 0.45 : 0) + (hasBig ? 0.7 : 0);
+  const userIntensity = clamp(state.glitchConfig.glitchIntensity, 0.2, 2.2);
+  const userScale = 0.6 + Math.pow(userIntensity, 1.35) * 0.35;
+  const target = clamp((0.18 + activityBoost + audioBoost) * userScale, 0, 2.4);
+
+  glitchVisual.target = target;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const eased = clamp(dt * 6, 0.05, 0.35);
+  glitchVisual.intensity = lerp(glitchVisual.intensity, glitchVisual.target, eased);
+
+  root.style.setProperty('--glitch-intensity', glitchVisual.intensity.toFixed(3));
+  document.body.classList.toggle('glitch-active', glitchVisual.intensity > 0.08);
+}
+
 function applyTimeTone(timeState) {
   if (!state.timeOfDayAdaptive) {
     state.colors.background = state.baseColors.background;
@@ -987,6 +1135,9 @@ function applyTimeTone(timeState) {
     state.colors.secondary = state.baseColors.secondary;
     return;
   }
+  const prevBg = state.colors.background;
+  const prevPrimary = state.colors.primary;
+  const prevSecondary = state.colors.secondary;
   let factor = 1;
   if (timeState.phase === 'night') factor = 0.82;
   else if (timeState.phase === 'evening') factor = 0.9;
@@ -998,6 +1149,21 @@ function applyTimeTone(timeState) {
   document.documentElement.style.setProperty('--primary', state.colors.primary);
   document.documentElement.style.setProperty('--secondary', state.colors.secondary);
   document.documentElement.style.setProperty('--bg', state.colors.background);
+  if (glitchSystem) {
+    state.glitchConfig.themePrimary = state.colors.primary;
+    state.glitchConfig.themeSecondary = state.colors.secondary;
+    glitchSystem.setConfig({
+      themePrimary: state.colors.primary,
+      themeSecondary: state.colors.secondary,
+    });
+  }
+  if (
+    prevBg !== state.colors.background ||
+    prevPrimary !== state.colors.primary ||
+    prevSecondary !== state.colors.secondary
+  ) {
+    stateStore.markDirty(['hudStatic', 'text']);
+  }
 }
 
 function scaleColor(color, factor) {
@@ -1024,9 +1190,26 @@ function scaleColor(color, factor) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-function showSystemText(text) {
+function showSystemText(payload) {
+  if (!payload) return;
+  if (typeof payload === 'string') {
+    logBuffer.push(payload, 'semantic');
+    stateStore.markDirty('text');
+    return;
+  }
+  const text = payload.text;
   if (!text) return;
-  logBuffer.push(text, 'semantic');
+  logBuffer.push(
+    {
+      text,
+      ts: payload.ts || Date.now(),
+      mode: payload.mode || '',
+      intent: payload.intent || '',
+      level: 'semantic',
+    },
+    'semantic'
+  );
+  stateStore.markDirty('text');
 }
 
 function updateSystemTextDisplay(dt, displayState = {}) {
@@ -1036,14 +1219,20 @@ function updateSystemTextDisplay(dt, displayState = {}) {
 function resetSystemText(force = false) {
   if (force || !state.log.persist) logBuffer.clear();
   logDisplayState = { level: 0, jitter: 0, flicker: 0 };
+  stateStore.markDirty('text');
 }
 
-function triggerSystemEvent(key, ttl = 6) {
-  systemEventTracker.trigger(key, ttl);
+function triggerSystemEvent(key, ttl = 6, payload = null) {
+  systemEventTracker.trigger(key, ttl, payload);
 }
 
-function triggerUserEvent(key, ttl = 4) {
-  userEventTracker.trigger(key, ttl);
+function triggerUserEvent(key, ttl = 4, payload = null) {
+  userEventTracker.trigger(key, ttl, payload);
+}
+
+function triggerLocalGlitch(options = {}) {
+  if (!state.glitchConfig.glitchesEnabled || !state.glitchConfig.localGlitchesEnabled) return false;
+  return glitchSystem.triggerLocal(options);
 }
 
 function updateUserInputEvents(dt, inputState, hit) {
@@ -1057,6 +1246,9 @@ function updateUserInputEvents(dt, inputState, hit) {
     triggerUserEvent('click', 4);
     if (wasIdle) triggerUserEvent('firstClickAfterIdle', 6);
     clickTimes.push(now);
+    if (hit.isInside && state.interactivity.clickEffectsEnabled) {
+      triggerLocalGlitch({ blockId: hit.hoveredBlockId });
+    }
   }
 
   clickTimes = clickTimes.filter(t => now - t < 2000);
@@ -1094,30 +1286,22 @@ function parseDiskUsage(raw) {
   };
 }
 
-function getElementRect(el) {
-  if (!el) return null;
-  const rect = el.getBoundingClientRect();
-  if (!rect || !isFinite(rect.width) || rect.width === 0) return null;
-  return {
-    x: rect.left,
-    y: rect.top,
-    w: rect.width,
-    h: rect.height,
-  };
-}
-
 function createEventTracker() {
   const events = new Map();
   return {
-    trigger(name, ttl = 4) {
+    trigger(name, ttl = 4, payload = null) {
       const until = performance.now() + ttl * 1000;
-      events.set(name, { until });
+      const prev = events.get(name);
+      const count = (prev?.count || 0) + 1;
+      events.set(name, { until, payload, count });
     },
     snapshot() {
       const now = performance.now();
       const active = {};
       events.forEach((value, key) => {
-        if (value.until > now) active[key] = true;
+        if (value.until > now) {
+          active[key] = value.payload ? { active: true, payload: value.payload, count: value.count } : true;
+        }
         else events.delete(key);
       });
       return active;
@@ -1126,20 +1310,121 @@ function createEventTracker() {
 }
 
 function resize() {
-  const bg = setupHiDPICanvas(bgCanvas);
   const fg = setupHiDPICanvas(fgCanvas);
-  const hud = setupHiDPICanvas(hudCanvas);
-  bgCtx = bg.ctx;
   fgCtx = fg.ctx;
-  hudCtx = hud.ctx;
-  dimensions = { width: bg.width, height: bg.height };
+  dimensions = hudRenderer.resize();
+  state.dimensions = dimensions;
+  bgCtx = hudRenderer.bgCtx;
+  hudCtx = hudRenderer.hudCtx;
+  textRenderer.resize(dimensions.width, dimensions.height);
+  fxRenderer.resize();
   updateHudLayout();
 }
 
-function loop() {
+function sanitizeContext(ctx, resetTransform = true) {
+  if (!ctx) return;
+  if (resetTransform) ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.filter = 'none';
+}
+
+function clearCanvas(ctx) {
+  if (!ctx) return;
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+}
+
+function stopRenderLoop() {
+  if (!renderLoopActive) return;
+  renderLoopActive = false;
+  mainLoop?.stop();
+}
+
+function startRenderLoop() {
+  if (renderLoopActive) return;
+  renderLoopActive = true;
+  lastOkTs = performance.now();
+  if (!mainLoop) {
+    mainLoop = new MainLoop({
+      update: updateFrame,
+      render: renderFrame,
+      onError: err => {
+        console.error('[HUD] render loop exception', err);
+        softReset('exception');
+      },
+    });
+  }
+  mainLoop.start();
+}
+
+function startWatchdog() {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(() => {
+    if (!renderLoopActive || softResetInProgress) return;
+    const now = performance.now();
+    const stalled = now - lastOkTs > WATCHDOG_STALL_MS;
+    if (stalled && now - lastSoftResetAt > 2000) {
+      softReset('watchdog');
+    }
+  }, WATCHDOG_INTERVAL_MS);
+}
+
+function softReset(reason = 'unknown') {
+  if (softResetInProgress) return;
   const now = performance.now();
-  const dt = Math.min(0.05, (now - lastFrame) / 1000);
-  lastFrame = now;
+  if (now - lastSoftResetAt < 1000) return;
+  softResetInProgress = true;
+  lastSoftResetAt = now;
+  softResetCount += 1;
+  lastSoftResetReason = reason;
+  console.warn(`[HUD] soft reset: ${reason}`);
+
+  try {
+    stopRenderLoop();
+
+    sanitizeContext(bgCtx, true);
+    sanitizeContext(fgCtx, true);
+    sanitizeContext(hudCtx, true);
+    clearCanvas(bgCtx);
+    clearCanvas(fgCtx);
+    clearCanvas(hudCtx);
+
+    resize();
+    sanitizeContext(bgCtx, false);
+    sanitizeContext(fgCtx, false);
+    sanitizeContext(hudCtx, false);
+
+    glitchSystem.reset?.();
+    interactionFX.resetTransient?.({ keepPins: true, keepDetail: true });
+    microAnimations.reset?.();
+    overlayMessages.reset?.();
+    semanticEngine.resetTransient?.();
+    audioDriver.reset?.();
+    glitchUpdateTimer = 0;
+
+    logDisplayState = { level: 0, jitter: 0, flicker: 0 };
+    frameCounter = 0;
+    fpsSample = { acc: 0, count: 0, lastStamp: performance.now(), fps: 60 };
+
+    hudRenderer.markStaticDirty();
+    textRenderer.markDirty();
+    stateStore.markDirty(['hudStatic', 'text']);
+
+    lastOkTs = performance.now();
+    startRenderLoop();
+  } finally {
+    softResetInProgress = false;
+  }
+}
+
+function updateFrame(dt, now) {
+  if (!renderLoopActive) return;
+  perfProfiler.beginFrame(now);
+  perfProfiler.start('update', now);
+  allocationDetector.resetFrame();
+  lastFrameDelta = dt * 1000;
+  frameState.now = now;
+  frameState.dt = dt;
 
   audioEngine.tick(now);
   state.audio = audioEngine.getState();
@@ -1151,6 +1436,31 @@ function loop() {
     eventBus.emit('block:pulse', { id: 'system', intensity: 1.1 });
   }
   applyTimeTone(timeState);
+  scheduler.update(now);
+
+  const trackState = state.cache.track || nowPlayingService.getState();
+  const musicState = musicContext.update(
+    {
+      trackTitle: trackState?.title,
+      artistName: trackState?.artist,
+      albumName: trackState?.album,
+      durationSec: trackState?.durationSec,
+      positionSec: trackState?.positionSec,
+      isPlaying: trackState?.playbackState === 'playing',
+    },
+    audioAgg,
+    timeState,
+    now,
+    { moodAggressiveness: state.mood.aggressiveness }
+  );
+  if (musicState?.novelty?.isNewTrack && musicState.hasData) {
+    triggerSystemEvent('TRACK_CHANGE', 8, {
+      title: musicState.trackTitle,
+      artist: musicState.artistName,
+      keywords: musicState.extractedKeywords,
+      topics: musicState.topicsWeights,
+    });
+  }
 
   if (profileOverride && now > profileOverride.expiresAt) {
     profileOverride = null;
@@ -1164,6 +1474,17 @@ function loop() {
   inputState.wheel = inputManager.consumeWheel();
 
   const hit = hitTest(inputState.pos.x, inputState.pos.y, blocks);
+  if (hit.hoveredBlockId === 'calendar' && blocks.calendar?.rect && calendarData) {
+    calendarHover = getCalendarHover(
+      blocks.calendar.rect,
+      calendarData,
+      { textScale: state.textScale },
+      inputState.pos.x,
+      inputState.pos.y
+    );
+  } else {
+    calendarHover = null;
+  }
   updateUserInputEvents(dt, inputState, hit);
   behaviorMemory.update(dt);
   if (hit.isInside) behaviorMemory.recordHover(hit.hoveredBlockId, dt);
@@ -1200,12 +1521,22 @@ function loop() {
   interactionFX.update(dt, inputState, hit, audioAgg);
   stateMachine.update(dt, audioAgg, inputState);
   updateLayerOffsets(interactionFX.getParallax(), coreState.modifiers);
+  if (state.mood.reactiveVisuals) {
+    const moodClass = musicState?.mood?.moodClass || 'steady';
+    glitchSystem.setMoodMultipliers(resolveMoodMultipliers(moodClass, state.mood.aggressiveness));
+  } else {
+    glitchSystem.setMoodMultipliers({ freqMul: 1, intensityMul: 1, bigEventBoost: 0, chaotic: false });
+  }
   glitchSystem.update(dt, now);
   const glitchDebug = glitchSystem.getDebugInfo();
-  const bigEventActive = (glitchDebug.active || []).some(id => id >= 39);
+  const bigEventActive =
+    (glitchDebug.activeMeta || []).some(entry => entry.category === 'big') ||
+    (glitchDebug.active || []).some(id => id >= 39);
   if (bigEventActive) triggerSystemEvent('glitchEvent', 4);
   if (lastBigEventActive && !bigEventActive) triggerSystemEvent('recovery', 6);
   lastBigEventActive = bigEventActive;
+  if (bigEventActive) lastBigEventAt = now;
+  const lastBigEventAgeSec = lastBigEventAt ? (now - lastBigEventAt) / 1000 : 999;
   const systemEvents = systemEventTracker.snapshot();
   const userEvents = {
     ...userEventTracker.snapshot(),
@@ -1213,15 +1544,37 @@ function loop() {
     idleDuration,
     hoverText: hit.hoveredBlockId === 'systemText',
   };
+  perfProfiler.start('textGen');
   const semanticText = semanticEngine.update(dt, {
     systemState: coreState.state,
     entropyLevel: entropy,
     audioState: audioAgg,
-    glitchState: { activeGlitches: glitchDebug.active || [], recentBigEvent: bigEventActive },
+    glitchState: {
+      activeGlitches: glitchDebug.active || [],
+      recentBigEvent: bigEventActive,
+      bigEventActive,
+      activeCount: glitchDebug.active?.length || 0,
+      lastBigEventAgeSec,
+      glitchIntensity: state.glitchConfig.glitchIntensity,
+      alienAlphabetStrength: state.glitchConfig.alienAlphabetStrength,
+    },
+    performanceState: {
+      fpsEstimate: fpsSample.fps || Math.round(1 / Math.max(0.001, dt)),
+      lastFrameDeltaMs: lastFrameDelta,
+    },
+    metrics: {
+      cpu: state.cache.perf?.psutil?.cpu,
+      gpu: state.cache.perf?.psutil?.gpu_usage,
+      mem: state.cache.perf?.psutil?.memory,
+    },
     behaviorMemory: behaviorSummary,
     systemEvents,
     userInputEvents: userEvents,
+    timeState,
+    musicContext: musicState,
+    moodAggressiveness: state.mood.aggressiveness,
   });
+  perfProfiler.end('textGen');
   if (semanticText) showSystemText(semanticText);
   if (state.semanticText.enabled) {
     updateSystemTextDisplay(dt, semanticEngine.getDisplayState());
@@ -1233,47 +1586,125 @@ function loop() {
 
   updateGlitchRuntime(dt, entropy, coreState.modifiers);
   state.parallax = interactionFX.getParallax();
+  updateGlitchVisual(dt, glitchDebug, audioAgg, bigEventActive);
 
-  drawBackground(bgCtx, { ...state, dimensions });
-  drawForeground(hudCtx, { ...state, dimensions });
-  if (calendarData && blocks.calendar?.rect) {
-    renderCalendarCanvas(hudCtx, blocks.calendar.rect, calendarData, {
-      colors: state.colors,
-      lineWidth: state.lineThickness,
-      textScale: state.textScale,
-    });
+  frameState.audioAgg = audioAgg;
+  frameState.timeState = timeState;
+  frameState.musicState = musicState;
+  frameState.glitchDebug = glitchDebug;
+  frameState.bigEventActive = bigEventActive;
+  frameState.lastBigEventAgeSec = lastBigEventAgeSec;
+  frameState.hit = hit;
+  frameState.inputState = inputState;
+  frameState.coreState = coreState;
+  frameState.entropy = entropy;
+  frameState.calendarHover = calendarHover;
+
+  perfProfiler.end('update', now);
+}
+
+function renderFrame(dt, now) {
+  if (!renderLoopActive) return;
+  const audioAgg = frameState.audioAgg;
+  const musicState = frameState.musicState;
+  const glitchDebug = frameState.glitchDebug || { active: [], activeMeta: [], nextIn: 0 };
+  const bigEventActive = frameState.bigEventActive;
+  const hit = frameState.hit || { hoveredBlockId: null };
+  const inputState = frameState.inputState || { velocity: { x: 0, y: 0 } };
+
+  if (stateStore.isDirty('hudStatic')) {
+    hudRenderer.markStaticDirty();
+    stateStore.clearDirty('hudStatic');
   }
-  if (state.log.enabled && blocks.systemText?.rect) {
-    logRenderer.render(hudCtx, blocks.systemText.rect, logBuffer.getEntries(), {
-      textScale: state.textScale,
-      fontScale: state.log.fontScale,
-      showTimestamp: state.log.showTimestamp,
-      locale: state.language,
-      displayState: logDisplayState,
-      color: 'rgba(232, 255, 247, 0.88)',
-      secondary: state.colors.secondary,
-    });
+  if (stateStore.isDirty('text')) {
+    textRenderer.markDirty();
+    stateStore.clearDirty('text');
   }
+
+  perfProfiler.start('renderHUD');
+  textRenderer.render(now, {
+    logEntries: logBuffer.getEntries(),
+    logRect: blocks.systemText?.rect,
+    logEnabled: state.log.enabled,
+    logDisplayState: logDisplayState,
+    calendarData,
+    calendarRect: blocks.calendar?.rect,
+    calendarHover: frameState.calendarHover,
+    colors: state.colors,
+    lineWidth: state.lineThickness,
+    textScale: state.textScale,
+    fontScale: state.log.fontScale,
+    showTimestamp: state.log.showTimestamp,
+    locale: state.language,
+    logColor: 'rgba(255, 255, 255, 0.98)',
+    logSecondary: 'rgba(132, 255, 226, 0.7)',
+  });
+  hudRenderer.render(state, {});
+  perfProfiler.end('renderHUD');
 
   fgCtx.clearRect(0, 0, dimensions.width, dimensions.height);
   fgCtx.drawImage(hudCanvas, 0, 0);
 
-  interactionFX.render(fgCtx, hudCanvas);
-  microAnimations.render(fgCtx, blocks);
-  glitchSystem.render(fgCtx, hudCanvas, fgCanvas);
-  narrativeEngine.render(fgCtx, dimensions.width, dimensions.height);
-  overlayMessages.render(fgCtx, dimensions.width, dimensions.height);
+  perfProfiler.start('renderFX');
+  fxRenderer.render(fgCtx, {
+    hudCanvas,
+    mainCanvas: fgCanvas,
+    blocks,
+    interactionFX,
+    microAnimations,
+    glitchSystem,
+    narrativeEngine,
+    overlayMessages,
+  });
+  perfProfiler.end('renderFX');
+
+  frameCounter += 1;
+  fpsSample.acc += dt;
+  fpsSample.count += 1;
+  if (now - fpsSample.lastStamp >= 1000) {
+    fpsSample.fps = Math.round(fpsSample.count / Math.max(0.001, fpsSample.acc));
+    fpsSample.acc = 0;
+    fpsSample.count = 0;
+    fpsSample.lastStamp = now;
+  }
+
+  const activeTimers = (clockTimer ? 1 : 0) + (watchdogTimer ? 1 : 0) + scheduler.getTaskCount();
+  perfProfiler.setCounters({
+    activeEffects: glitchDebug.active?.length || 0,
+    activeTimers,
+    activeFetches: fetchTracker.active,
+    logSize: logBuffer.getEntries().length,
+  });
+  perfProfiler.endFrame(now);
+  perfProfiler.maybeLog(now);
+  const perfStats = perfProfiler.getStats();
+  allocationDetector.maybeWarn(now);
+  const allocStats = allocationDetector.getStats();
+
+  const sinceOk = (now - lastOkTs) / 1000;
   diagnostics.update({
     hoveredBlock: hit.hoveredBlockId,
     mouseSpeed: Math.hypot(inputState.velocity.x, inputState.velocity.y),
     audio: audioAgg,
+    mood: musicState?.mood,
+    textAI: semanticEngine.getDebugInfo?.(),
     activeGlitches: glitchDebug.active,
     nextGlitch: glitchDebug.nextIn,
-    fps: Math.round(1 / Math.max(0.001, dt)),
+    profiler: perfStats,
+    allocations: allocStats,
+    frameCount: frameCounter,
+    fps: fpsSample.fps || Math.round(1 / Math.max(0.001, dt)),
+    watchdog: {
+      status: now - lastOkTs > WATCHDOG_STALL_MS ? 'STALLED' : 'OK',
+      sinceOk,
+      lastFrameMs: lastFrameDelta,
+      softResets: softResetCount,
+      lastResetReason: lastSoftResetReason,
+    },
   });
   diagnostics.render(fgCtx, blocks, hit.hoveredBlockId);
 
-  requestAnimationFrame(loop);
+  lastOkTs = performance.now();
 }
 
 function updateNowPlayingUI(track) {
@@ -1301,50 +1732,11 @@ function updateNowPlayingUI(track) {
     if (hasData) eventBus.emit('message', { text: strings.messages.trackAcquired, ttl: 1.2 });
     if (hasData) eventBus.emit('block:pulse', { id: 'weather', intensity: 0.7 });
     if (hasData) triggerSystemEvent('trackChange', 8);
-    if (coverEl) {
-      coverEl.classList.remove('pulse');
-      void coverEl.offsetWidth;
-      coverEl.classList.add('pulse');
-    }
   }
-
-  const coverSrc = normalizeCover(nextTrack?.cover);
-  if (coverSrc) {
-    setCoverImage(coverSrc);
-  } else if (trackChanged || !lastCoverSrc) {
-    setCoverPlaceholder();
-  }
-}
-
-function setCoverPlaceholder() {
-  if (!coverEl) return;
-  coverEl.innerHTML = '';
-  coverEl.classList.remove('has-cover');
-  coverEl.classList.add('placeholder');
-  lastCoverSrc = null;
-}
-
-function setCoverImage(src) {
-  if (!coverEl || !src) return;
-  if (lastCoverSrc === src && coverEl.querySelector('img')) return;
-  coverEl.innerHTML = '';
-  coverEl.classList.remove('placeholder');
-  coverEl.classList.remove('has-cover');
-  const img = new Image();
-  img.decoding = 'async';
-  img.src = src;
-  img.onload = () => {
-    lastCoverSrc = src;
-    coverEl.classList.add('has-cover');
-  };
-  img.onerror = () => {
-    lastCoverSrc = null;
-    setCoverPlaceholder();
-  };
-  coverEl.appendChild(img);
 }
 
 function updateWeatherUI(data) {
+  perfProfiler.start('weather');
   const strings = getStrings();
   setText(weatherCityEl, strings.weather.city);
   if (!data) {
@@ -1354,6 +1746,7 @@ function updateWeatherUI(data) {
     weatherForecastEl.innerHTML = '';
     if (weatherIconEl) weatherIconEl.innerHTML = '';
     lastWeatherSignature = null;
+    perfProfiler.end('weather');
     return;
   }
   state.cache.weather = data;
@@ -1386,6 +1779,7 @@ function updateWeatherUI(data) {
     card.append(title, high, low);
     weatherForecastEl.appendChild(card);
   });
+  perfProfiler.end('weather');
 }
 
 const WEATHER_ICONS = {
@@ -1469,41 +1863,8 @@ function setWeatherIcon(iconKey) {
   weatherIconEl.innerHTML = WEATHER_ICONS[key];
 }
 
-function normalizeCover(raw) {
-  if (!raw) return null;
-  let value = raw;
-  if (typeof raw === 'object') {
-    const mime = raw.mimeType || raw.mimetype || raw.type;
-    const data = raw.data || raw.base64 || raw.buffer;
-    if (data && mime) {
-      return `data:${mime};base64,${data}`;
-    }
-    value = raw.url || raw.src || raw.path || data || '';
-  }
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (/^data:image\//i.test(trimmed)) return trimmed;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^file:\/\//i.test(trimmed)) return trimmed;
-  if (/^(steam|local):/i.test(trimmed)) return trimmed;
-  if (/^blob:/i.test(trimmed)) return trimmed;
-  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) {
-    return `file:///${trimmed.replace(/\\/g, '/')}`;
-  }
-  if (/^\/9j\//.test(trimmed)) {
-    return `data:image/jpeg;base64,${trimmed}`;
-  }
-  if (/^iVBOR/.test(trimmed)) {
-    return `data:image/png;base64,${trimmed}`;
-  }
-  if (/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 64) {
-    return `data:image/png;base64,${trimmed}`;
-  }
-  return trimmed;
-}
-
 function updatePerfUI({ data, online }) {
+  perfProfiler.start('perf');
   const strings = getStrings();
   state.cache.perf = data;
   state.cache.perfOnline = online;
@@ -1513,6 +1874,7 @@ function updatePerfUI({ data, online }) {
     setText(hwStatusEl, online ? strings.hw.waiting : strings.hw.offline);
     setText(hwUpdateEl, `${strings.hw.last}: --`);
     updateCpuCores([]);
+    perfProfiler.end('perf');
     return;
   }
   const p = data.psutil || {};
@@ -1541,17 +1903,25 @@ function updatePerfUI({ data, online }) {
     if (netDelta > 60000) {
       eventBus.emit('block:pulse', { id: 'system', intensity: 0.8 });
     }
-    if (cpuDelta > 22) triggerSystemEvent('cpuSpike', 8);
-    if (gpuDelta > 22) triggerSystemEvent('gpuSpike', 8);
+    if (cpuDelta > 22) {
+      triggerSystemEvent('cpuSpike', 8);
+      triggerLocalGlitch({ tags: ['electric'], blockId: 'system' });
+    }
+    if (gpuDelta > 22) {
+      triggerSystemEvent('gpuSpike', 8);
+      triggerLocalGlitch({ tags: ['electric'], blockId: 'system' });
+    }
   }
   lastMetrics = { ...p };
 
   if (lastNetDown !== null) {
     if (lastNetDown > 50000 && (p.download_speed ?? 0) < 5000) {
       triggerSystemEvent('netDrop', 8);
+      triggerLocalGlitch({ tags: ['link', 'signal'], preferPair: true, blockId: 'network' });
     }
     if (lastNetDown < 5000 && (p.download_speed ?? 0) > 25000) {
       triggerSystemEvent('netRestore', 8);
+      triggerLocalGlitch({ tags: ['link', 'signal'], preferPair: true, blockId: 'network' });
     }
   }
   lastNetDown = p.download_speed ?? lastNetDown;
@@ -1561,6 +1931,7 @@ function updatePerfUI({ data, online }) {
     const diff = Math.abs(diskCUsage.used - lastDiskUsage.c.used);
     if (diskCUsage.total > 0 && diff / diskCUsage.total > 0.02) {
       triggerSystemEvent('diskAnomaly', 12);
+      triggerLocalGlitch({ tags: ['signal'], blockId: 'disks' });
     }
   }
   if (diskCUsage) lastDiskUsage.c = diskCUsage;
@@ -1569,6 +1940,7 @@ function updatePerfUI({ data, online }) {
     const diff = Math.abs(diskDUsage.used - lastDiskUsage.d.used);
     if (diskDUsage.total > 0 && diff / diskDUsage.total > 0.02) {
       triggerSystemEvent('diskAnomaly', 12);
+      triggerLocalGlitch({ tags: ['signal'], blockId: 'disks' });
     }
   }
   if (diskDUsage) lastDiskUsage.d = diskDUsage;
@@ -1592,6 +1964,7 @@ function updatePerfUI({ data, online }) {
   setText(hwStatusEl, status);
   const stamp = p.timestamp || data.timestamp;
   setText(hwUpdateEl, `${strings.hw.last}: ${formatHwTimestamp(stamp)}`);
+  perfProfiler.end('perf');
 }
 
 function setGauge(target, percent, subText, locale) {
@@ -1653,6 +2026,7 @@ function updateClock(force = false) {
     calendarData = buildCalendarData(now, state.language, calendarOffset);
     updateClock.lastCalendarKey = calendarKey;
     updateClock.lastLocale = state.language;
+    stateStore.markDirty('text');
   }
 }
 
@@ -1683,469 +2057,396 @@ function updateDebug() {
 }
 
 // Wallpaper Engine property integration
-window.wallpaperPropertyListener = {
-  applyUserProperties: props => {
-    const get = key => props[key] ?? props[key.toLowerCase()] ?? props[key.toUpperCase()];
-    const boolVal = prop => {
-      const v = prop?.value;
-      if (typeof v === 'string') return v.toLowerCase() === 'true';
-      return !!v;
+function applySettingsToSubsystems(changedKeys) {
+  if (!changedKeys || !changedKeys.size) return;
+  const has = key => changedKeys.has(key);
+  const hasAny = (...keys) => keys.some(has);
+
+  if (has('themecolorprimary')) updateColor('primary', settings.getColor255('themecolorprimary'));
+  if (has('themecolorsecondary')) updateColor('secondary', settings.getColor255('themecolorsecondary'));
+  if (has('backgroundcolor')) updateColor('background', settings.getColor255('backgroundcolor'));
+
+  if (has('linethickness')) {
+    state.lineThickness = settings.getNumber('linethickness');
+    document.documentElement.style.setProperty('--line', `${state.lineThickness}px`);
+    stateStore.markDirty(['hudStatic', 'text']);
+  }
+  if (has('gridenabled')) {
+    state.gridEnabled = settings.getBool('gridenabled');
+    stateStore.markDirty('hudStatic');
+  }
+  if (has('griddensity')) {
+    state.gridDensity = settings.getNumber('griddensity');
+    updateHudLayout();
+  }
+
+  if (has('audiosensitivity')) audioEngine.updateSettings({ sensitivity: settings.getNumber('audiosensitivity') });
+  if (has('audiosmoothing')) audioEngine.updateSettings({ smoothing: settings.getNumber('audiosmoothing') });
+  if (has('barscount')) audioEngine.updateSettings({ barsCount: settings.getNumber('barscount') });
+  if (has('waveformenabled')) audioEngine.updateSettings({ waveformEnabled: settings.getBool('waveformenabled') });
+  if (has('waveformheight')) audioEngine.updateSettings({ waveformHeight: settings.getNumber('waveformheight') });
+  if (has('backgroundequalizeralpha')) {
+    state.bgEQAlphaBase = settings.getNumber('backgroundequalizeralpha');
+    const preset = VISUAL_PROFILES[state.activeProfile] || VISUAL_PROFILES.ENGINEERING;
+    state.bgEQAlpha = state.bgEQAlphaBase * preset.bgEQAlpha;
+    document.documentElement.style.setProperty('--bg-eq-alpha', `${state.bgEQAlpha}`);
+  }
+
+  if (has('nowplayingenabled')) {
+    panelNowPlayingEl.style.display = settings.getBool('nowplayingenabled') ? 'block' : 'none';
+  }
+  if (has('nowplayingcoversize')) {
+    const size = clamp(settings.getNumber('nowplayingcoversize'), 24, 160);
+    document.documentElement.style.setProperty('--now-playing-cover-size', `${size}px`);
+    const coverEl = document.querySelector('.now-playing-cover');
+    if (coverEl) {
+      coverEl.style.width = `${size}px`;
+      coverEl.style.height = `${size}px`;
+    }
+  }
+  if (has('layoutpreset')) setLayout(settings.getString('layoutpreset'));
+
+  if (has('hwpollintervalsec')) {
+    scheduler.setInterval('perf', settings.getNumber('hwpollintervalsec') * 1000);
+  }
+
+  if (has('weatherenabled')) {
+    const enabled = settings.getBool('weatherenabled');
+    state.weatherEnabled = enabled;
+    panelWeatherEl.style.display = enabled ? 'block' : 'none';
+    scheduler.setEnabled('weather', enabled);
+    if (enabled) schedulerTasks.weather.nextAt = performance.now();
+  }
+  if (hasAny('weatherprovider', 'weatherapikey', 'units')) {
+    const opts = {
+      provider: settings.getString('weatherprovider') || weatherService.options.provider,
+      apiKey: settings.getString('weatherapikey') || weatherService.options.apiKey,
+      units: settings.getString('units') || weatherService.options.units,
     };
-    const numVal = prop => (prop ? Number(prop.value) : undefined);
+    if (opts.units) state.units = opts.units;
+    weatherService.setOptions(opts);
+    scheduler.setInterval('weather', weatherService.options.refreshMinutes * 60 * 1000);
+    if (state.weatherEnabled) schedulerTasks.weather.nextAt = performance.now();
+  }
 
-    const primary = get('themecolorprimary');
-    if (primary) updateColor('primary', primary.value);
-    const secondary = get('themecolorsecondary');
-    if (secondary) updateColor('secondary', secondary.value);
-    const background = get('backgroundcolor');
-    if (background) updateColor('background', background.value);
+  if (has('language')) {
+    const locale = settings.getString('language');
+    if (locale) setLanguage(locale);
+  }
+  if (has('textscale')) setTextScale(settings.getNumber('textscale'));
 
-    const lineThickness = get('linethickness');
-    if (lineThickness) {
-      state.lineThickness = numVal(lineThickness);
-      document.documentElement.style.setProperty('--line', `${state.lineThickness}px`);
-    }
-    const gridEnabled = get('gridenabled');
-    if (gridEnabled) state.gridEnabled = boolVal(gridEnabled);
-    const gridDensity = get('griddensity');
-    if (gridDensity) {
-      state.gridDensity = numVal(gridDensity);
-      updateHudLayout();
-    }
+  if (has('semantictextenabled')) {
+    state.semanticText.enabled = settings.getBool('semantictextenabled');
+    semanticEngine.setConfig({ enabled: state.semanticText.enabled });
+    if (!state.semanticText.enabled) resetSystemText();
+  }
+  if (has('semantictextfrequency')) {
+    state.semanticText.frequency = settings.getNumber('semantictextfrequency');
+    semanticEngine.setConfig({ frequency: state.semanticText.frequency });
+  }
+  if (has('semantictextverbosity')) {
+    state.semanticText.verbosity = clamp(settings.getNumber('semantictextverbosity'), 0.4, 1.4);
+    semanticEngine.setConfig({ verbosity: state.semanticText.verbosity });
+  }
+  if (has('semantictextsarcasm')) {
+    state.semanticText.sarcasm = clamp(settings.getNumber('semantictextsarcasm'), 0, 1);
+    semanticEngine.setConfig({ sarcasm: state.semanticText.sarcasm });
+  }
+  if (has('semantictextdegradationstrength')) {
+    state.semanticText.degradationStrength = clamp(settings.getNumber('semantictextdegradationstrength'), 0, 1);
+    semanticEngine.setConfig({ degradationStrength: state.semanticText.degradationStrength });
+  }
+  if (has('semantictextlanguageprofile')) {
+    state.semanticText.languageProfile = settings.getString('semantictextlanguageprofile');
+    semanticEngine.setConfig({ languageProfile: state.semanticText.languageProfile });
+  }
+  if (has('semantictextidlemode')) {
+    state.semanticText.idleMode = settings.getBool('semantictextidlemode');
+    semanticEngine.setConfig({ idleMode: state.semanticText.idleMode });
+  }
+  if (has('textmodestrategy')) {
+    state.semanticText.textModeStrategy = settings.getString('textmodestrategy');
+    semanticEngine.setConfig({ textModeStrategy: state.semanticText.textModeStrategy });
+  }
+  if (has('smartcandidatecount')) {
+    state.semanticText.smartCandidateCount = clamp(settings.getNumber('smartcandidatecount'), 10, 80);
+    semanticEngine.setConfig({ smartCandidateCount: state.semanticText.smartCandidateCount });
+  }
+  if (has('degradationsensitivity')) {
+    state.semanticText.degradationSensitivity = clamp(settings.getNumber('degradationsensitivity'), 0.5, 2);
+    semanticEngine.setConfig({ degradationSensitivity: state.semanticText.degradationSensitivity });
+  }
+  if (has('robotmodethreshold')) {
+    state.semanticText.robotModeThreshold = clamp(settings.getNumber('robotmodethreshold'), 0.5, 2);
+    semanticEngine.setConfig({ robotModeThreshold: state.semanticText.robotModeThreshold });
+  }
+  if (has('apologyenabled')) {
+    state.semanticText.apologyEnabled = settings.getBool('apologyenabled');
+    semanticEngine.setConfig({ apologyEnabled: state.semanticText.apologyEnabled });
+  }
+  if (has('preemptivewarnings')) {
+    state.semanticText.preemptiveWarnings = settings.getBool('preemptivewarnings');
+    semanticEngine.setConfig({ preemptiveWarnings: state.semanticText.preemptiveWarnings });
+  }
+  if (has('whiningintensity')) {
+    state.semanticText.whiningIntensity = clamp(settings.getNumber('whiningintensity'), 0, 2);
+    semanticEngine.setConfig({ whiningIntensity: state.semanticText.whiningIntensity });
+  }
+  if (has('debugtextai')) {
+    state.semanticText.debugTextAI = settings.getBool('debugtextai');
+    semanticEngine.setConfig({ debugTextAI: state.semanticText.debugTextAI });
+    updateDiagnosticsMode();
+  }
 
-    const audioSensitivity = get('audiosensitivity');
-    if (audioSensitivity) audioEngine.updateSettings({ sensitivity: numVal(audioSensitivity) });
-    const audioSmoothing = get('audiosmoothing');
-    if (audioSmoothing) audioEngine.updateSettings({ smoothing: numVal(audioSmoothing) });
-    const barsCount = get('barscount');
-    if (barsCount) audioEngine.updateSettings({ barsCount: numVal(barsCount) });
-    const waveformEnabled = get('waveformenabled');
-    if (waveformEnabled) audioEngine.updateSettings({ waveformEnabled: boolVal(waveformEnabled) });
-    const waveformHeight = get('waveformheight');
-    if (waveformHeight) audioEngine.updateSettings({ waveformHeight: numVal(waveformHeight) });
-    const bgEqAlpha = get('backgroundequalizeralpha');
-    if (bgEqAlpha) {
-      state.bgEQAlphaBase = numVal(bgEqAlpha);
-      const preset = VISUAL_PROFILES[state.activeProfile] || VISUAL_PROFILES.ENGINEERING;
-      state.bgEQAlpha = state.bgEQAlphaBase * preset.bgEQAlpha;
-      document.documentElement.style.setProperty('--bg-eq-alpha', `${state.bgEQAlpha}`);
-    }
+  if (has('moodreactivetext')) {
+    state.mood.reactiveText = settings.getBool('moodreactivetext');
+    semanticEngine.setConfig({ moodReactiveText: state.mood.reactiveText });
+  }
+  if (has('moodreactivevisuals')) {
+    state.mood.reactiveVisuals = settings.getBool('moodreactivevisuals');
+  }
+  if (has('moodaggressiveness')) {
+    state.mood.aggressiveness = clamp(settings.getNumber('moodaggressiveness'), 0.5, 2);
+  }
+  if (has('mooddebug')) {
+    state.mood.debug = settings.getBool('mooddebug');
+    updateDiagnosticsMode();
+  }
 
-    const nowPlayingEnabled = get('nowplayingenabled');
-    if (nowPlayingEnabled) {
-      panelNowPlayingEl.style.display = boolVal(nowPlayingEnabled) ? 'block' : 'none';
-    }
-    const coverSize = get('coversize');
-    if (coverSize) {
-      const s = numVal(coverSize);
-      document.documentElement.style.setProperty('--cover-size', `${s}px`);
-      coverEl.style.width = `${s}px`;
-      coverEl.style.height = `${s}px`;
-    }
-    const coverPosition = get('coverposition');
-    if (coverPosition) setCoverPosition(coverPosition.value);
-    const coverStyle = get('coverstyle');
-    if (coverStyle) setCoverStyle(coverStyle.value);
-    const layoutPreset = get('layoutpreset');
-    if (layoutPreset) setLayout(layoutPreset.value);
+  if (has('logenabled')) {
+    state.log.enabled = settings.getBool('logenabled');
+    stateStore.markDirty('text');
+  }
+  if (has('logmaxentries')) {
+    state.log.maxEntries = clamp(settings.getNumber('logmaxentries'), 50, 500);
+    logBuffer.setMaxEntries(state.log.maxEntries);
+    stateStore.markDirty('text');
+  }
+  if (has('logshowtimestamp')) {
+    state.log.showTimestamp = settings.getBool('logshowtimestamp');
+    logRenderer.setConfig({ showTimestamp: state.log.showTimestamp });
+    stateStore.markDirty('text');
+  }
+  if (has('logfontscale')) {
+    state.log.fontScale = clamp(settings.getNumber('logfontscale'), 0.8, 1.6);
+    logRenderer.setConfig({ fontScale: state.log.fontScale });
+    stateStore.markDirty('text');
+  }
+  if (has('logpersistbetweensessions')) {
+    state.log.persist = settings.getBool('logpersistbetweensessions');
+    logBuffer.setPersist(state.log.persist);
+    if (state.log.persist) logBuffer.setStorageKey(getLogStorageKey(state.language));
+  }
+  if (has('visualprofile')) applyVisualProfile(settings.getString('visualprofile'));
+  if (has('entropylevel')) {
+    state.entropyLevel = clamp(settings.getNumber('entropylevel'), 0, 1);
+    entropyController.setBase(state.entropyLevel);
+  }
+  if (has('behaviormemoryenabled')) {
+    state.behaviorMemoryEnabled = settings.getBool('behaviormemoryenabled');
+    behaviorMemory.setEnabled(state.behaviorMemoryEnabled);
+  }
+  if (has('narrativeeventsenabled')) {
+    state.narrativeEventsEnabled = settings.getBool('narrativeeventsenabled');
+    narrativeEngine.setEnabled(state.narrativeEventsEnabled);
+  }
+  if (has('degradationenabled')) {
+    state.degradationEnabled = settings.getBool('degradationenabled');
+    coreStateMachine.setOptions({ degradationEnabled: state.degradationEnabled });
+  }
+  if (has('timeofdayadaptive')) {
+    state.timeOfDayAdaptive = settings.getBool('timeofdayadaptive');
+    entropyController.setTimeAdaptive(state.timeOfDayAdaptive);
+    coreStateMachine.setOptions({ timeOfDayAdaptive: state.timeOfDayAdaptive });
+  }
 
-    const hwInterval = get('hwpollintervalsec');
-    if (hwInterval) perfMonitor.setInterval(numVal(hwInterval));
-
-    const weatherEnabled = get('weatherenabled');
-    if (weatherEnabled) {
-      const enabled = boolVal(weatherEnabled);
-      state.weatherEnabled = enabled;
-      panelWeatherEl.style.display = enabled ? 'block' : 'none';
-      enabled ? weatherService.start() : weatherService.stop();
-    }
-    const weatherProvider = get('weatherprovider');
-    const weatherApiKey = get('weatherapikey');
-    const units = get('units');
-    if (weatherProvider || weatherApiKey || units) {
-      const opts = {
-        provider: weatherProvider?.value || weatherService.options.provider,
-        apiKey: weatherApiKey?.value || weatherService.options.apiKey,
-        units: units?.value || weatherService.options.units,
-      };
-      if (units?.value) state.units = units.value;
-      if (state.weatherEnabled) weatherService.updateOptions(opts);
-      else Object.assign(weatherService.options, opts);
-    }
-
-    const language = get('language');
-    if (language) setLanguage(language.value);
-    const textScale = get('textscale');
-    if (textScale) setTextScale(numVal(textScale));
-    const semanticTextEnabled = get('semantictextenabled');
-    if (semanticTextEnabled) {
-      state.semanticText.enabled = boolVal(semanticTextEnabled);
-      semanticEngine.setConfig({ enabled: state.semanticText.enabled });
-      if (!state.semanticText.enabled) resetSystemText();
-    }
-    const semanticTextFrequency = get('semantictextfrequency');
-    if (semanticTextFrequency) {
-      state.semanticText.frequency = numVal(semanticTextFrequency);
-      semanticEngine.setConfig({ frequency: state.semanticText.frequency });
-    }
-    const semanticTextVerbosity = get('semantictextverbosity');
-    if (semanticTextVerbosity) {
-      state.semanticText.verbosity = clamp(numVal(semanticTextVerbosity), 0.4, 1.4);
-      semanticEngine.setConfig({ verbosity: state.semanticText.verbosity });
-    }
-    const semanticTextSarcasm = get('semantictextsarcasm');
-    if (semanticTextSarcasm) {
-      state.semanticText.sarcasm = clamp(numVal(semanticTextSarcasm), 0, 1);
-      semanticEngine.setConfig({ sarcasm: state.semanticText.sarcasm });
-    }
-    const semanticTextDegradation = get('semantictextdegradationstrength');
-    if (semanticTextDegradation) {
-      state.semanticText.degradationStrength = clamp(numVal(semanticTextDegradation), 0, 1);
-      semanticEngine.setConfig({ degradationStrength: state.semanticText.degradationStrength });
-    }
-    const semanticTextLanguageProfile = get('semantictextlanguageprofile');
-    if (semanticTextLanguageProfile) {
-      state.semanticText.languageProfile = semanticTextLanguageProfile.value;
-      semanticEngine.setConfig({ languageProfile: state.semanticText.languageProfile });
-    }
-    const semanticTextIdleMode = get('semantictextidlemode');
-    if (semanticTextIdleMode) {
-      state.semanticText.idleMode = boolVal(semanticTextIdleMode);
-      semanticEngine.setConfig({ idleMode: state.semanticText.idleMode });
-    }
-
-    const logEnabled = get('logenabled');
-    if (logEnabled) {
-      state.log.enabled = boolVal(logEnabled);
-    }
-    const logMaxEntries = get('logmaxentries');
-    if (logMaxEntries) {
-      state.log.maxEntries = clamp(numVal(logMaxEntries), 50, 500);
-      logBuffer.setMaxEntries(state.log.maxEntries);
-    }
-    const logShowTimestamp = get('logshowtimestamp');
-    if (logShowTimestamp) {
-      state.log.showTimestamp = boolVal(logShowTimestamp);
-      logRenderer.setConfig({ showTimestamp: state.log.showTimestamp });
-    }
-    const logFontScale = get('logfontscale');
-    if (logFontScale) {
-      state.log.fontScale = clamp(numVal(logFontScale), 0.8, 1.6);
-      logRenderer.setConfig({ fontScale: state.log.fontScale });
-    }
-    const logPersist = get('logpersistbetweensessions');
-    if (logPersist) {
-      state.log.persist = boolVal(logPersist);
-      logBuffer.setPersist(state.log.persist);
-      if (state.log.persist) logBuffer.setStorageKey(getLogStorageKey(state.language));
-    }
-    const visualProfile = get('visualprofile');
-    if (visualProfile) applyVisualProfile(visualProfile.value);
-    const entropyLevel = get('entropylevel');
-    if (entropyLevel) {
-      state.entropyLevel = clamp(numVal(entropyLevel), 0, 1);
-      entropyController.setBase(state.entropyLevel);
-    }
-    const behaviorMemoryEnabled = get('behaviormemoryenabled');
-    if (behaviorMemoryEnabled) {
-      state.behaviorMemoryEnabled = boolVal(behaviorMemoryEnabled);
-      behaviorMemory.setEnabled(state.behaviorMemoryEnabled);
-    }
-    const narrativeEventsEnabled = get('narrativeeventsenabled');
-    if (narrativeEventsEnabled) {
-      state.narrativeEventsEnabled = boolVal(narrativeEventsEnabled);
-      narrativeEngine.setEnabled(state.narrativeEventsEnabled);
-    }
-    const degradationEnabled = get('degradationenabled');
-    if (degradationEnabled) {
-      state.degradationEnabled = boolVal(degradationEnabled);
-      coreStateMachine.setOptions({ degradationEnabled: state.degradationEnabled });
-    }
-    const timeOfDayAdaptive = get('timeofdayadaptive');
-    if (timeOfDayAdaptive) {
-      state.timeOfDayAdaptive = boolVal(timeOfDayAdaptive);
-      entropyController.setTimeAdaptive(state.timeOfDayAdaptive);
-      coreStateMachine.setOptions({ timeOfDayAdaptive: state.timeOfDayAdaptive });
-    }
-
-    const glitchesEnabled = get('glitchesenabled');
-    if (glitchesEnabled) {
-      state.glitchConfig.glitchesEnabled = boolVal(glitchesEnabled);
-      glitchSystem.setConfig({ glitchesEnabled: state.glitchConfig.glitchesEnabled });
-    }
-    const glitchIntervalMin = get('glitchintervalminsec');
-    if (glitchIntervalMin) {
-      state.glitchConfig.glitchIntervalMinSec = numVal(glitchIntervalMin);
-      glitchSystem.setConfig({ glitchIntervalMinSec: state.glitchConfig.glitchIntervalMinSec });
-    }
-    const glitchIntervalMax = get('glitchintervalmaxsec');
-    if (glitchIntervalMax) {
-      state.glitchConfig.glitchIntervalMaxSec = numVal(glitchIntervalMax);
-      glitchSystem.setConfig({ glitchIntervalMaxSec: state.glitchConfig.glitchIntervalMaxSec });
-    }
-    const glitchIntensity = get('glitchintensity');
-    if (glitchIntensity) {
-      state.glitchConfig.glitchIntensity = clamp(numVal(glitchIntensity), 0.2, 2);
-      glitchSystem.setConfig({ glitchIntensity: state.glitchConfig.glitchIntensity });
-    }
-    const musicReactive = get('musicreactiveglitches');
-    if (musicReactive) {
-      state.glitchConfig.musicReactiveGlitches = boolVal(musicReactive);
-      glitchSystem.setConfig({ musicReactiveGlitches: state.glitchConfig.musicReactiveGlitches });
-    }
-    const maxSimultaneous = get('maxsimultaneousglitches');
-    if (maxSimultaneous) {
-      state.glitchConfig.maxSimultaneousGlitches = numVal(maxSimultaneous);
-      glitchSystem.setConfig({ maxSimultaneousGlitches: state.glitchConfig.maxSimultaneousGlitches });
-    }
-    const allowScreenWide = get('allowscreenwideeffects');
-    if (allowScreenWide) {
-      state.glitchConfig.allowScreenWideEffects = boolVal(allowScreenWide);
-      glitchSystem.setConfig({ allowScreenWideEffects: state.glitchConfig.allowScreenWideEffects });
-    }
-    const bigEventChance = get('bigeventchance');
-    if (bigEventChance) {
-      state.glitchConfig.bigEventChance = clamp(numVal(bigEventChance), 0, 1);
-      glitchSystem.setConfig({ bigEventChance: state.glitchConfig.bigEventChance });
-    }
-    const chromatic = get('chromaticaberrationenabled');
-    if (chromatic) {
-      state.glitchConfig.chromaticAberrationEnabled = boolVal(chromatic);
-      glitchSystem.setConfig({ chromaticAberrationEnabled: state.glitchConfig.chromaticAberrationEnabled });
-    }
-    const alienStrength = get('alienalphabetstrength');
-    if (alienStrength) {
-      state.glitchConfig.alienAlphabetStrength = clamp(numVal(alienStrength), 0, 1);
-      glitchSystem.setConfig({ alienAlphabetStrength: state.glitchConfig.alienAlphabetStrength });
-    }
-    const alienSet = get('aliensymbolset');
-    if (alienSet && alienSet.value) {
-      state.glitchConfig.alienSymbolSet = alienSet.value;
+  if (has('glitchesenabled')) {
+    state.glitchConfig.glitchesEnabled = settings.getBool('glitchesenabled');
+    glitchSystem.setConfig({ glitchesEnabled: state.glitchConfig.glitchesEnabled });
+  }
+  if (has('glitchintervalminsec')) {
+    state.glitchConfig.glitchIntervalMinSec = settings.getNumber('glitchintervalminsec');
+    glitchSystem.setConfig({ glitchIntervalMinSec: state.glitchConfig.glitchIntervalMinSec });
+  }
+  if (has('glitchintervalmaxsec')) {
+    state.glitchConfig.glitchIntervalMaxSec = settings.getNumber('glitchintervalmaxsec');
+    glitchSystem.setConfig({ glitchIntervalMaxSec: state.glitchConfig.glitchIntervalMaxSec });
+  }
+  if (has('glitchintensity')) {
+    state.glitchConfig.glitchIntensity = clamp(settings.getNumber('glitchintensity'), 0.2, 2);
+    glitchSystem.setConfig({ glitchIntensity: state.glitchConfig.glitchIntensity });
+  }
+  if (has('musicreactiveglitches')) {
+    state.glitchConfig.musicReactiveGlitches = settings.getBool('musicreactiveglitches');
+    glitchSystem.setConfig({ musicReactiveGlitches: state.glitchConfig.musicReactiveGlitches });
+  }
+  if (has('localglitchesenabled')) {
+    state.glitchConfig.localGlitchesEnabled = settings.getBool('localglitchesenabled');
+    glitchSystem.setConfig({ localGlitchesEnabled: state.glitchConfig.localGlitchesEnabled });
+  }
+  if (has('localglitchintensityboost')) {
+    state.glitchConfig.localGlitchIntensityBoost = clamp(settings.getNumber('localglitchintensityboost'), 0, 2);
+    glitchSystem.setConfig({ localGlitchIntensityBoost: state.glitchConfig.localGlitchIntensityBoost });
+  }
+  if (has('localglitchfrequencyboost')) {
+    state.glitchConfig.localGlitchFrequencyBoost = clamp(settings.getNumber('localglitchfrequencyboost'), 0, 2);
+    glitchSystem.setConfig({ localGlitchFrequencyBoost: state.glitchConfig.localGlitchFrequencyBoost });
+  }
+  if (has('allowtwoblockglitches')) {
+    state.glitchConfig.allowTwoBlockGlitches = settings.getBool('allowtwoblockglitches');
+    glitchSystem.setConfig({ allowTwoBlockGlitches: state.glitchConfig.allowTwoBlockGlitches });
+  }
+  if (has('electriceffectsenabled')) {
+    state.glitchConfig.electricEffectsEnabled = settings.getBool('electriceffectsenabled');
+    glitchSystem.setConfig({ electricEffectsEnabled: state.glitchConfig.electricEffectsEnabled });
+  }
+  if (has('electricintensity')) {
+    state.glitchConfig.electricIntensity = clamp(settings.getNumber('electricintensity'), 0.5, 2);
+    glitchSystem.setConfig({ electricIntensity: state.glitchConfig.electricIntensity });
+  }
+  if (has('electricarccooldown')) {
+    state.glitchConfig.electricArcCooldown = clamp(settings.getNumber('electricarccooldown'), 5, 60);
+    glitchSystem.setConfig({ electricArcCooldown: state.glitchConfig.electricArcCooldown });
+  }
+  if (has('electricladderspeed')) {
+    state.glitchConfig.electricLadderSpeed = clamp(settings.getNumber('electricladderspeed'), 0.5, 2);
+    glitchSystem.setConfig({ electricLadderSpeed: state.glitchConfig.electricLadderSpeed });
+  }
+  if (has('electricaudioreactive')) {
+    state.glitchConfig.electricAudioReactive = settings.getBool('electricaudioreactive');
+    glitchSystem.setConfig({ electricAudioReactive: state.glitchConfig.electricAudioReactive });
+  }
+  if (has('maxsimultaneousglitches')) {
+    state.glitchConfig.maxSimultaneousGlitches = settings.getNumber('maxsimultaneousglitches');
+    glitchSystem.setConfig({ maxSimultaneousGlitches: state.glitchConfig.maxSimultaneousGlitches });
+  }
+  if (has('allowscreenwideeffects')) {
+    state.glitchConfig.allowScreenWideEffects = settings.getBool('allowscreenwideeffects');
+    glitchSystem.setConfig({ allowScreenWideEffects: state.glitchConfig.allowScreenWideEffects });
+  }
+  if (has('bigeventchance')) {
+    state.glitchConfig.bigEventChance = clamp(settings.getNumber('bigeventchance'), 0, 1);
+    glitchSystem.setConfig({ bigEventChance: state.glitchConfig.bigEventChance });
+  }
+  if (has('chromaticaberrationenabled')) {
+    state.glitchConfig.chromaticAberrationEnabled = settings.getBool('chromaticaberrationenabled');
+    glitchSystem.setConfig({ chromaticAberrationEnabled: state.glitchConfig.chromaticAberrationEnabled });
+  }
+  if (has('alienalphabetstrength')) {
+    const value = clamp(settings.getNumber('alienalphabetstrength'), 0, 2);
+    state.glitchConfig.alienAlphabetStrength = value;
+    state.semanticText.alienAlphabetStrength = value;
+    glitchSystem.setConfig({ alienAlphabetStrength: state.glitchConfig.alienAlphabetStrength });
+    semanticEngine.setConfig({ alienAlphabetStrength: state.semanticText.alienAlphabetStrength });
+  }
+  if (has('aliensymbolset')) {
+    const value = settings.getString('aliensymbolset');
+    if (value) {
+      state.glitchConfig.alienSymbolSet = value;
       glitchSystem.setConfig({ alienSymbolSet: state.glitchConfig.alienSymbolSet });
       interactionFX.setConfig({ symbolSet: state.glitchConfig.alienSymbolSet });
     }
-    const debugGlitchOverlay = get('debugglitchoverlay');
-    if (debugGlitchOverlay) {
-      state.glitchConfig.debugGlitchOverlay = boolVal(debugGlitchOverlay);
-      glitchSystem.setConfig({ debugGlitchOverlay: state.glitchConfig.debugGlitchOverlay });
-      updateDiagnosticsMode();
-    }
+  }
+  if (has('debugglitchoverlay')) {
+    state.glitchConfig.debugGlitchOverlay = settings.getBool('debugglitchoverlay');
+    glitchSystem.setConfig({ debugGlitchOverlay: state.glitchConfig.debugGlitchOverlay });
+    updateDiagnosticsMode();
+  }
 
-    const interactivityEnabled = get('interactivityenabled');
-    if (interactivityEnabled) {
-      state.interactivity.interactivityEnabled = boolVal(interactivityEnabled);
-      interactionFX.setConfig({ interactivityEnabled: state.interactivity.interactivityEnabled });
-    }
-    const hoverEffectsEnabled = get('hovereffectsenabled');
-    if (hoverEffectsEnabled) {
-      state.interactivity.hoverEffectsEnabled = boolVal(hoverEffectsEnabled);
-      interactionFX.setConfig({ hoverEffectsEnabled: state.interactivity.hoverEffectsEnabled });
-    }
-    const clickEffectsEnabled = get('clickeffectsenabled');
-    if (clickEffectsEnabled) {
-      state.interactivity.clickEffectsEnabled = boolVal(clickEffectsEnabled);
-      interactionFX.setConfig({ clickEffectsEnabled: state.interactivity.clickEffectsEnabled });
-    }
-    const cursorTrailEnabled = get('cursortrailenabled');
-    if (cursorTrailEnabled) {
-      state.interactivity.cursorTrailEnabled = boolVal(cursorTrailEnabled);
-      interactionFX.setConfig({ cursorTrailEnabled: state.interactivity.cursorTrailEnabled });
-    }
-    const parallaxEnabled = get('parallaxenabled');
-    if (parallaxEnabled) {
-      state.interactivity.parallaxEnabled = boolVal(parallaxEnabled);
-      interactionFX.setConfig({ parallaxEnabled: state.interactivity.parallaxEnabled });
-    }
-    const interactiveControlsEnabled = get('interactivecontrolsenabled');
-    if (interactiveControlsEnabled) {
-      state.interactivity.interactiveControlsEnabled = boolVal(interactiveControlsEnabled);
-      interactionFX.setConfig({ interactiveControlsEnabled: state.interactivity.interactiveControlsEnabled });
-    }
-    const hiddenGesturesEnabled = get('hiddengesturesenabled');
-    if (hiddenGesturesEnabled) {
-      state.hiddenGesturesEnabled = boolVal(hiddenGesturesEnabled);
-      state.interactivity.hiddenGesturesEnabled = state.hiddenGesturesEnabled;
-      interactionFX.setConfig({ hiddenGesturesEnabled: state.hiddenGesturesEnabled });
-    }
-    const idleTimeoutSec = get('idletimeoutsec');
-    if (idleTimeoutSec) {
-      state.interactivity.idleTimeoutSec = numVal(idleTimeoutSec);
-      inputManager.options.idleTimeoutSec = state.interactivity.idleTimeoutSec;
-    }
-    const uiResponsiveness = get('uiresponsiveness');
-    if (uiResponsiveness) {
-      state.interactivity.uiResponsiveness = numVal(uiResponsiveness);
-      interactionFX.setConfig({ uiResponsiveness: state.interactivity.uiResponsiveness });
-    }
-    const tooltipsEnabled = get('tooltipsenabled');
-    if (tooltipsEnabled) {
-      state.interactivity.tooltipsEnabled = boolVal(tooltipsEnabled);
-      interactionFX.setConfig({ tooltipsEnabled: state.interactivity.tooltipsEnabled });
-    }
-    const diagnosticsEnabled = get('diagnosticsenabled');
-    if (diagnosticsEnabled) {
-      state.interactivity.diagnosticsEnabled = boolVal(diagnosticsEnabled);
-      updateDiagnosticsMode();
-    }
-    const thresholdCpu = get('thresholdscpuhigh');
-    if (thresholdCpu) state.thresholds.cpuHigh = numVal(thresholdCpu);
-    const thresholdGpu = get('thresholdsgpuhigh');
-    if (thresholdGpu) state.thresholds.gpuHigh = numVal(thresholdGpu);
-    const thresholdNet = get('thresholdsnethigh');
-    if (thresholdNet) state.thresholds.netHigh = numVal(thresholdNet);
+  if (has('interactivityenabled')) {
+    state.interactivity.interactivityEnabled = settings.getBool('interactivityenabled');
+    interactionFX.setConfig({ interactivityEnabled: state.interactivity.interactivityEnabled });
+  }
+  if (has('hovereffectsenabled')) {
+    state.interactivity.hoverEffectsEnabled = settings.getBool('hovereffectsenabled');
+    interactionFX.setConfig({ hoverEffectsEnabled: state.interactivity.hoverEffectsEnabled });
+  }
+  if (has('clickeffectsenabled')) {
+    state.interactivity.clickEffectsEnabled = settings.getBool('clickeffectsenabled');
+    interactionFX.setConfig({ clickEffectsEnabled: state.interactivity.clickEffectsEnabled });
+  }
+  if (has('cursortrailenabled')) {
+    state.interactivity.cursorTrailEnabled = settings.getBool('cursortrailenabled');
+    interactionFX.setConfig({ cursorTrailEnabled: state.interactivity.cursorTrailEnabled });
+  }
+  if (has('parallaxenabled')) {
+    state.interactivity.parallaxEnabled = settings.getBool('parallaxenabled');
+    interactionFX.setConfig({ parallaxEnabled: state.interactivity.parallaxEnabled });
+  }
+  if (has('interactivecontrolsenabled')) {
+    state.interactivity.interactiveControlsEnabled = settings.getBool('interactivecontrolsenabled');
+    interactionFX.setConfig({ interactiveControlsEnabled: state.interactivity.interactiveControlsEnabled });
+  }
+  if (has('hiddengesturesenabled')) {
+    state.hiddenGesturesEnabled = settings.getBool('hiddengesturesenabled');
+    state.interactivity.hiddenGesturesEnabled = state.hiddenGesturesEnabled;
+    interactionFX.setConfig({ hiddenGesturesEnabled: state.hiddenGesturesEnabled });
+  }
+  if (has('idletimeoutsec')) {
+    state.interactivity.idleTimeoutSec = settings.getNumber('idletimeoutsec');
+    inputManager.options.idleTimeoutSec = state.interactivity.idleTimeoutSec;
+  }
+  if (has('uiresponsiveness')) {
+    state.interactivity.uiResponsiveness = settings.getNumber('uiresponsiveness');
+    interactionFX.setConfig({ uiResponsiveness: state.interactivity.uiResponsiveness });
+  }
+  if (has('tooltipsenabled')) {
+    state.interactivity.tooltipsEnabled = settings.getBool('tooltipsenabled');
+    interactionFX.setConfig({ tooltipsEnabled: state.interactivity.tooltipsEnabled });
+  }
+  if (has('diagnosticsenabled')) {
+    state.interactivity.diagnosticsEnabled = settings.getBool('diagnosticsenabled');
+    updateDiagnosticsMode();
+  }
+  if (has('perfprofilerenabled')) {
+    state.interactivity.perfProfilerEnabled = settings.getBool('perfprofilerenabled');
+    updateDiagnosticsMode();
+  }
+  if (has('thresholdscpuhigh')) state.thresholds.cpuHigh = settings.getNumber('thresholdscpuhigh');
+  if (has('thresholdsgpuhigh')) state.thresholds.gpuHigh = settings.getNumber('thresholdsgpuhigh');
+  if (has('thresholdsnethigh')) state.thresholds.netHigh = settings.getNumber('thresholdsnethigh');
+  if (hasAny('thresholdscpuhigh', 'thresholdsgpuhigh', 'thresholdsnethigh')) {
     microAnimations.updateThresholds(state.thresholds);
+  }
 
-    const externalIpEnabled = get('externalipenabled');
-    if (externalIpEnabled) {
-      state.externalIpEnabled = boolVal(externalIpEnabled);
-      state.externalIpEnabled ? startExternalIp() : stopExternalIp();
-      updateExternalIpUI(state.cache.ip, !state.externalIpEnabled);
-    }
+  if (has('externalipenabled')) {
+    state.externalIpEnabled = settings.getBool('externalipenabled');
+    scheduler.setEnabled('ip', state.externalIpEnabled);
+    if (state.externalIpEnabled) schedulerTasks.ip.nextAt = performance.now();
+    updateExternalIpUI(state.cache.ip, !state.externalIpEnabled);
+  }
 
-    const showSeconds = get('showseconds');
-    if (showSeconds) {
-      state.showSeconds = boolVal(showSeconds);
-      setupClockTimer();
-    }
-  },
-};
+  if (has('showseconds')) {
+    state.showSeconds = settings.getBool('showseconds');
+    setupClockTimer();
+  }
+}
+
+installWallpaperPropertyListener(applySettingsToSubsystems);
 
 function updateHudLayout() {
   if (!dimensions) return;
-  const { width, height } = dimensions;
-  const rawSpacing = Math.min(width, height) / state.gridDensity;
-  const grid = Math.max(16, Math.min(28, Math.round(rawSpacing)));
-  const pad = grid;
-  const gap = grid;
-  const safeTop = Math.round(grid * 0.9);
-  const safeBottom = Math.round(grid * 2.8);
-  const safeLeft = Math.round(grid * 0.9);
-  const safeRight = Math.round(grid * 0.9);
-  const availableWidth = Math.max(0, width - safeLeft - safeRight);
-  const availableHeight = Math.max(0, height - safeTop - safeBottom);
-  const usableWidth = availableWidth - pad * 2;
-  const usableHeight = availableHeight - pad * 2;
-
-  let col = Math.floor((usableWidth - gap * 2) / 3 / grid) * grid;
-  if (!isFinite(col) || col <= 0) {
-    const base = Math.floor(Math.max(0, usableWidth - gap * 2) / 3 / grid) * grid;
-    col = Math.max(grid * 3, base || grid * 3);
-  }
-  let hudWidth = col * 3 + gap * 2 + pad * 2;
-  if (hudWidth > availableWidth) {
-    const maxCol = Math.floor((availableWidth - pad * 2 - gap * 2) / 3 / grid) * grid;
-    col = Math.max(grid * 3, maxCol);
-    hudWidth = col * 3 + gap * 2 + pad * 2;
-  }
-
-  const ratios = [0.9, 1, 0.7];
-  const sum = ratios.reduce((a, b) => a + b, 0);
-  const heightForRows = Math.max(0, usableHeight - gap * 2);
-  let rowTop = Math.floor((heightForRows * ratios[0]) / sum / grid) * grid;
-  let rowMid = Math.floor((heightForRows * ratios[1]) / sum / grid) * grid;
-  let rowBottom = heightForRows - rowTop - rowMid;
-  rowBottom = Math.max(grid * 3, Math.floor(rowBottom / grid) * grid);
-  let hudHeight = rowTop + rowMid + rowBottom + gap * 2 + pad * 2;
-  if (hudHeight > availableHeight) {
-    const maxRow = Math.floor((availableHeight - pad * 2 - gap * 2) / grid) * grid;
-    rowBottom = Math.max(grid * 3, maxRow - rowTop - rowMid);
-    hudHeight = rowTop + rowMid + rowBottom + gap * 2 + pad * 2;
-  }
-
-  const rawOffsetX = safeLeft + Math.round((availableWidth - hudWidth) / 2 / grid) * grid;
-  const rawOffsetY = safeTop + Math.round((availableHeight - hudHeight) / 2 / grid) * grid;
-  const maxOffsetX = Math.max(0, width - hudWidth);
-  const maxOffsetY = Math.max(0, height - hudHeight);
-  const offsetX = clamp(rawOffsetX, 0, maxOffsetX);
-  const offsetY = clamp(rawOffsetY, 0, maxOffsetY);
-
-  state.hudLayout = {
-    x: offsetX,
-    y: offsetY,
-    pad,
-    gap,
-    col,
-    rowTop,
-    rowMid,
-    rowBottom,
-    width: hudWidth,
-    height: hudHeight,
-  };
-
-  const root = document.documentElement;
-  root.style.setProperty('--hud-pad', `${pad}px`);
-  root.style.setProperty('--hud-gap', `${gap}px`);
-  root.style.setProperty('--hud-col', `${col}px`);
-  root.style.setProperty('--hud-row-top', `${rowTop}px`);
-  root.style.setProperty('--hud-row-mid', `${rowMid}px`);
-  root.style.setProperty('--hud-row-bottom', `${rowBottom}px`);
-  root.style.setProperty('--hud-width', `${hudWidth}px`);
-  root.style.setProperty('--hud-height', `${hudHeight}px`);
-  root.style.setProperty('--hud-x', `${offsetX}px`);
-  root.style.setProperty('--hud-y', `${offsetY}px`);
-
+  const layout = computeHudLayout(dimensions, state.gridDensity);
+  if (!layout) return;
+  state.hudLayout = layout;
+  applyHudCssVars(layout);
+  stateStore.markDirty(['layout', 'hudStatic', 'text']);
   updateBlockRegistry();
 }
 
 function updateBlockRegistry() {
   if (!state.hudLayout || !dimensions) return;
-  const layout = state.hudLayout;
-  const x1 = layout.x + layout.pad;
-  const y1 = layout.y + layout.pad;
-  const x2 = x1 + layout.col + layout.gap;
-  const x3 = x2 + layout.col + layout.gap;
-  const y2 = y1 + layout.rowTop + layout.gap;
-  const y3 = y2 + layout.rowMid + layout.gap;
-  const leftHeight = layout.rowTop + layout.rowMid + layout.rowBottom + layout.gap * 2;
-
-  const timeRect = { x: x3, y: y1, w: layout.col, h: layout.rowTop };
-  const calendarRect =
-    getElementRect(calendarEl) || {
-      x: x3 + 12,
-      y: y1 + layout.rowTop * 0.35,
-      w: layout.col - 24,
-      h: layout.rowTop * 0.6,
-    };
-  const waveformRect = {
-    x: layout.x,
-    y: layout.y + layout.height * 0.32,
-    w: layout.width,
-    h: layout.rowMid * 0.5,
-  };
-  const systemTextRect =
-    getElementRect(systemTextPanelEl) || {
-      x: x1 + layout.col * 0.06,
-      y: y1 + leftHeight * 0.44,
-      w: layout.col * 0.88,
-      h: leftHeight * 0.48,
-    };
-
-  blocks = {
-    nowPlaying: { rect: { x: x1, y: y1, w: layout.col, h: leftHeight }, importance: 3, priority: 4 },
-    systemText: { rect: systemTextRect, importance: 2.2, priority: 6 },
-    weather: { rect: { x: x2, y: y1, w: layout.col, h: layout.rowTop }, importance: 2, priority: 3 },
-    time: { rect: timeRect, importance: 2, priority: 3 },
-    calendar: { rect: calendarRect, importance: 1, priority: 2 },
-    system: { rect: { x: x2, y: y2, w: layout.col * 2 + layout.gap, h: layout.rowMid }, importance: 3, priority: 5 },
-    network: { rect: { x: x2, y: y3, w: layout.col, h: layout.rowBottom }, importance: 2, priority: 2 },
-    disks: { rect: { x: x3, y: y3, w: layout.col, h: layout.rowBottom }, importance: 2, priority: 2 },
-    waveform: { rect: waveformRect, importance: 1, priority: 1 },
-  };
-
   const strings = getStrings();
-  blockLabels = {
-    nowPlaying: strings.titles.nowPlaying,
-    systemText: strings.titles.systemText,
-    weather: strings.titles.weather,
-    time: strings.titles.clock,
-    calendar: strings.titles.calendar,
-    system: strings.titles.metrics,
-    network: strings.titles.network,
-    disks: strings.titles.disks,
-    waveform: strings.titles.waveform,
+  const rects = {
+    calendar: getElementRect(calendarEl),
+    systemText: getElementRect(systemTextPanelEl),
   };
+  const registry = computeBlockRegistry(state.hudLayout, rects, strings);
+  blocks = registry.blocks;
+  blockLabels = registry.blockLabels;
+  textTargets = registry.textTargets;
+  stateStore.markDirty('text');
 
-  textTargets = Array.from(document.querySelectorAll('[data-glitch="1"]'));
   glitchSystem.setBlocks(blocks, blockLabels, textTargets);
   interactionFX.setBlocks(blocks, blockElements);
 }
@@ -2170,6 +2471,15 @@ function updateColor(key, arr) {
   if (key === 'background') document.documentElement.style.setProperty('--bg', col);
   if (key === 'primary') document.documentElement.style.setProperty('--primary', col);
   if (key === 'secondary') document.documentElement.style.setProperty('--secondary', col);
+  stateStore.markDirty(['hudStatic', 'text']);
+  if (glitchSystem && (key === 'primary' || key === 'secondary')) {
+    state.glitchConfig.themePrimary = state.colors.primary;
+    state.glitchConfig.themeSecondary = state.colors.secondary;
+    glitchSystem.setConfig({
+      themePrimary: state.colors.primary,
+      themeSecondary: state.colors.secondary,
+    });
+  }
 }
 
 function setLanguage(locale) {
@@ -2182,6 +2492,7 @@ function setLanguage(locale) {
   semanticEngine.setConfig({ language: state.language });
   logBuffer.setStorageKey(getLogStorageKey(state.language));
   logRenderer.setConfig({ locale: state.language });
+  stateStore.markDirty('text');
   resetSystemText(true);
   applyLanguage();
   setupClockTimer();
@@ -2194,16 +2505,7 @@ function setTextScale(scale) {
   interactionFX.setConfig({ textScale: state.textScale });
   microAnimations.setTextScale(state.textScale);
   logRenderer.setConfig({ textScale: state.textScale });
-}
-
-function setCoverPosition(value) {
-  if (!panelNowPlayingEl) return;
-  panelNowPlayingEl.classList.toggle('cover-right', value === 'right');
-}
-
-function setCoverStyle(value) {
-  if (!coverEl) return;
-  coverEl.classList.toggle('rounded', value === 'rounded');
+  stateStore.markDirty('text');
 }
 
 function setLayout(layout) {

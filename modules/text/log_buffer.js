@@ -40,11 +40,23 @@ export class LogBuffer {
     this._scheduleSave(true);
   }
 
-  push(text, level = 'info', timestamp = Date.now()) {
+  push(payload, level = 'info', timestamp = Date.now()) {
+    let text = payload;
+    let ts = timestamp;
+    let mode = '';
+    let intent = '';
+    let entryLevel = level;
+    if (payload && typeof payload === 'object') {
+      text = payload.text;
+      ts = payload.ts ?? timestamp;
+      mode = payload.mode || '';
+      intent = payload.intent || '';
+      if (payload.level) entryLevel = payload.level;
+    }
     if (!text || typeof text !== 'string') return;
     const trimmed = text.trim();
     if (!trimmed) return;
-    this.entries.push({ text: trimmed, ts: timestamp, level });
+    this.entries.push({ text: trimmed, ts, level: entryLevel, mode, intent });
     if (this.entries.length > this.maxEntries) {
       this.entries = this.entries.slice(-this.maxEntries);
     }
@@ -71,6 +83,8 @@ export class LogBuffer {
           text: String(entry.text ?? '').trim(),
           ts: Number(entry.ts) || Date.now(),
           level: entry.level || 'info',
+          mode: entry.mode || '',
+          intent: entry.intent || '',
         }));
       }
     } catch (err) {

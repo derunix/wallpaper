@@ -1,0 +1,19 @@
+# OS + editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor configs
+.vscode/
+.idea/
+
+# Temp / logs
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Build artifacts (if added later)
+dist/
+node_modules/

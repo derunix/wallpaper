@@ -70,6 +70,18 @@ export class AudioDriver {
       peak: this.peak,
     };
   }
+
+  reset() {
+    this.energy = 0;
+    this.low = 0;
+    this.mid = 0;
+    this.high = 0;
+    this.transient = 0;
+    this.peak = false;
+    this._peakHold = 0;
+    this._lastEnergy = 0;
+    this._hasInput = false;
+  }
 }
 
 function lerp(a, b, t) {

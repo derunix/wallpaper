@@ -99,34 +99,6 @@
         "type": "bool",
         "value": true
       },
-      "coversize": {
-        "order": 13,
-        "text": "Cover size",
-        "type": "slider",
-        "min": 120,
-        "max": 320,
-        "value": 200
-      },
-      "coverposition": {
-        "order": 14,
-        "text": "Cover position",
-        "type": "combo",
-        "value": "left",
-        "options": [
-          { "value": "left", "label": "Left" },
-          { "value": "right", "label": "Right" }
-        ]
-      },
-      "coverstyle": {
-        "order": 15,
-        "text": "Cover style",
-        "type": "combo",
-        "value": "square",
-        "options": [
-          { "value": "square", "label": "Square" },
-          { "value": "rounded", "label": "Rounded" }
-        ]
-      },
       "layoutpreset": {
         "order": 16,
         "text": "Layout preset",
@@ -316,6 +288,12 @@
         "type": "bool",
         "value": false
       },
+      "perfprofilerenabled": {
+        "order": 45,
+        "text": "Performance profiler",
+        "type": "bool",
+        "value": false
+      },
       "thresholdscpuhigh": {
         "order": 42,
         "text": "CPU high threshold",
@@ -409,8 +387,8 @@
         "text": "Alien alphabet strength",
         "type": "slider",
         "min": 0,
-        "max": 1,
-        "value": 0.7
+        "max": 2,
+        "value": 1
       },
       "aliensymbolset": {
         "order": 55,
@@ -485,14 +463,40 @@
         "type": "bool",
         "value": true
       },
-      "logenabled": {
+      "moodreactivetext": {
         "order": 65,
+        "text": "Mood reactive text",
+        "type": "bool",
+        "value": true
+      },
+      "moodreactivevisuals": {
+        "order": 66,
+        "text": "Mood reactive visuals",
+        "type": "bool",
+        "value": true
+      },
+      "moodaggressiveness": {
+        "order": 67,
+        "text": "Mood aggressiveness",
+        "type": "slider",
+        "min": 0.5,
+        "max": 2,
+        "value": 1
+      },
+      "mooddebug": {
+        "order": 68,
+        "text": "Mood debug",
+        "type": "bool",
+        "value": false
+      },
+      "logenabled": {
+        "order": 69,
         "text": "Log enabled",
         "type": "bool",
         "value": true
       },
       "logmaxentries": {
-        "order": 66,
+        "order": 70,
         "text": "Log max entries",
         "type": "slider",
         "min": 50,
@@ -500,13 +504,13 @@
         "value": 300
       },
       "logshowtimestamp": {
-        "order": 67,
+        "order": 71,
         "text": "Log show timestamps",
         "type": "bool",
         "value": true
       },
       "logfontscale": {
-        "order": 68,
+        "order": 72,
         "text": "Log font scale",
         "type": "slider",
         "min": 0.8,
@@ -514,8 +518,134 @@
         "value": 1.2
       },
       "logpersistbetweensessions": {
-        "order": 69,
+        "order": 73,
         "text": "Log persist between sessions",
+        "type": "bool",
+        "value": true
+      },
+      "localglitchesenabled": {
+        "order": 74,
+        "text": "Local glitches enabled",
+        "type": "bool",
+        "value": true
+      },
+      "localglitchintensityboost": {
+        "order": 75,
+        "text": "Local glitch intensity boost",
+        "type": "slider",
+        "min": 0,
+        "max": 2,
+        "value": 1
+      },
+      "localglitchfrequencyboost": {
+        "order": 76,
+        "text": "Local glitch frequency boost",
+        "type": "slider",
+        "min": 0,
+        "max": 2,
+        "value": 1
+      },
+      "allowtwoblockglitches": {
+        "order": 77,
+        "text": "Allow two-block glitches",
+        "type": "bool",
+        "value": true
+      },
+      "textmodestrategy": {
+        "order": 78,
+        "text": "Text mode strategy",
+        "type": "combo",
+        "value": "auto",
+        "options": [
+          { "value": "auto", "label": "Auto" },
+          { "value": "force_smart", "label": "Force smart" },
+          { "value": "force_markov", "label": "Force markov" },
+          { "value": "force_robot", "label": "Force robot" }
+        ]
+      },
+      "smartcandidatecount": {
+        "order": 79,
+        "text": "Smart candidate count",
+        "type": "slider",
+        "min": 10,
+        "max": 80,
+        "value": 40
+      },
+      "degradationsensitivity": {
+        "order": 80,
+        "text": "Degradation sensitivity",
+        "type": "slider",
+        "min": 0.5,
+        "max": 2,
+        "value": 1
+      },
+      "robotmodethreshold": {
+        "order": 81,
+        "text": "Robot mode threshold",
+        "type": "slider",
+        "min": 0.5,
+        "max": 2,
+        "value": 1
+      },
+      "apologyenabled": {
+        "order": 82,
+        "text": "Apology enabled",
+        "type": "bool",
+        "value": true
+      },
+      "preemptivewarnings": {
+        "order": 83,
+        "text": "Preemptive warnings",
+        "type": "bool",
+        "value": true
+      },
+      "whiningintensity": {
+        "order": 84,
+        "text": "Whining intensity",
+        "type": "slider",
+        "min": 0,
+        "max": 2,
+        "value": 1.2
+      },
+      "debugtextai": {
+        "order": 85,
+        "text": "Text AI debug",
+        "type": "bool",
+        "value": false
+      },
+      "electriceffectsenabled": {
+        "order": 86,
+        "text": "Electric effects enabled",
+        "type": "bool",
+        "value": true
+      },
+      "electricintensity": {
+        "order": 87,
+        "text": "Electric intensity",
+        "type": "slider",
+        "min": 0.5,
+        "max": 2,
+        "value": 1.2
+      },
+      "electricarccooldown": {
+        "order": 88,
+        "text": "Electric arc cooldown (sec)",
+        "type": "slider",
+        "min": 5,
+        "max": 60,
+        "value": 20
+      },
+      "electricladderspeed": {
+        "order": 89,
+        "text": "Electric ladder speed",
+        "type": "slider",
+        "min": 0.5,
+        "max": 2,
+        "value": 1
+      },
+      "electricaudioreactive": {
+        "order": 90,
+        "text": "Electric audio reactive",
         "type": "bool",
         "value": true
       }

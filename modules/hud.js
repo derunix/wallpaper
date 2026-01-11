@@ -3,6 +3,16 @@ import { paintContactPads, clamp } from './utils.js';
 const GRID_PADDING = 24;
 
 export function drawBackground(ctx, state) {
+  drawBackgroundStatic(ctx, state);
+  drawBackgroundDynamic(ctx, state);
+}
+
+export function drawForeground(ctx, state) {
+  drawForegroundDynamic(ctx, state);
+  drawForegroundStatic(ctx, state);
+}
+
+export function drawBackgroundStatic(ctx, state) {
   const { width, height } = state.dimensions;
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = state.colors.background;
@@ -11,18 +21,23 @@ export function drawBackground(ctx, state) {
   if (state.gridEnabled) {
     drawGrid(ctx, width, height, state);
   }
+}
+
+export function drawBackgroundDynamic(ctx, state) {
+  const { width, height } = state.dimensions;
   drawEqualizer(ctx, width, height, state);
 }
 
-export function drawForeground(ctx, state) {
+export function drawForegroundStatic(ctx, state) {
   const { width, height } = state.dimensions;
-  ctx.clearRect(0, 0, width, height);
+  drawHudFrames(ctx, width, height, state);
+}
 
+export function drawForegroundDynamic(ctx, state) {
+  const { width, height } = state.dimensions;
   if (state.audio.waveformEnabled) {
     drawWaveform(ctx, width, height, state);
   }
-
-  drawHudFrames(ctx, width, height, state);
 }
 
 function drawGrid(ctx, width, height, state) {
