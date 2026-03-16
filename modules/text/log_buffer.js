@@ -56,6 +56,9 @@ export class LogBuffer {
     if (!text || typeof text !== 'string') return;
     const trimmed = text.trim();
     if (!trimmed) return;
+    // Deduplicate: skip if same text was pushed within the last 5 seconds
+    const last = this.entries.length > 0 ? this.entries[this.entries.length - 1] : null;
+    if (last && last.text === trimmed && ts - last.ts < 5000) return;
     this.entries.push({ text: trimmed, ts, level: entryLevel, mode, intent });
     if (this.entries.length > this.maxEntries) {
       this.entries = this.entries.slice(-this.maxEntries);

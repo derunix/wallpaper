@@ -13,6 +13,8 @@ export class WeatherService {
       apiKey: '',
       units: 'metric',
       refreshMinutes: 20,
+      lat: DEFAULT_COORDS.lat,
+      lon: DEFAULT_COORDS.lon,
       ...options,
     };
     this.onUpdate = onUpdate;
@@ -53,20 +55,22 @@ export class WeatherService {
   }
 
   async _fetchWeather() {
+    const lat = this.options.lat || DEFAULT_COORDS.lat;
+    const lon = this.options.lon || DEFAULT_COORDS.lon;
     if (this.options.provider === 'open-meteo') {
-      return fetchOpenMeteo(this.options.units);
+      return fetchOpenMeteo(this.options.units, lat, lon);
     }
     if (this.options.provider === 'owm') {
-      return fetchOpenWeather(this.options.apiKey, this.options.units);
+      return fetchOpenWeather(this.options.apiKey, this.options.units, lat, lon);
     }
-    return fetchOpenMeteo(this.options.units);
+    return fetchOpenMeteo(this.options.units, lat, lon);
   }
 }
 
-async function fetchOpenMeteo(units = 'metric') {
+async function fetchOpenMeteo(units = 'metric', lat = DEFAULT_COORDS.lat, lon = DEFAULT_COORDS.lon) {
   const params = new URLSearchParams({
-    latitude: DEFAULT_COORDS.lat,
-    longitude: DEFAULT_COORDS.lon,
+    latitude: lat,
+    longitude: lon,
     current_weather: 'true',
     forecast_days: '3',
     daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
@@ -104,9 +108,9 @@ async function fetchOpenMeteo(units = 'metric') {
   );
 }
 
-async function fetchOpenWeather(apiKey, units = 'metric') {
+async function fetchOpenWeather(apiKey, units = 'metric', lat = DEFAULT_COORDS.lat, lon = DEFAULT_COORDS.lon) {
   if (!apiKey) throw new Error('Missing weather API key');
-  const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${DEFAULT_COORDS.lat}&lon=${DEFAULT_COORDS.lon}&cnt=24&units=${units}&appid=${apiKey}`;
+  const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&cnt=24&units=${units}&appid=${apiKey}`;
   const data = await fetchJson(url, { timeoutMs: 4500 });
   const current = data.list?.[0];
   const codeInfo = mapOwmCode(current?.weather?.[0]?.id);

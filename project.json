@@ -110,6 +110,12 @@
           { "value": "Top HUD", "label": "Top HUD" }
         ]
       },
+      "hwmonitorurl": {
+        "order": 16,
+        "text": "Monitor URL",
+        "type": "text",
+        "value": "http://172.25.160.1:8085/"
+      },
       "hwpollintervalsec": {
         "order": 17,
         "text": "Hardware poll interval (sec)",
@@ -139,6 +145,18 @@
         "text": "Weather API key",
         "type": "text",
         "value": ""
+      },
+      "weatherlat": {
+        "order": 20.1,
+        "text": "Weather latitude",
+        "type": "text",
+        "value": "41.7167"
+      },
+      "weatherlon": {
+        "order": 20.2,
+        "text": "Weather longitude",
+        "type": "text",
+        "value": "44.7833"
       },
       "units": {
         "order": 21,
@@ -289,7 +307,7 @@
         "value": false
       },
       "perfprofilerenabled": {
-        "order": 45,
+        "order": 44.5,
         "text": "Performance profiler",
         "type": "bool",
         "value": false
@@ -338,7 +356,7 @@
         "type": "slider",
         "min": 8,
         "max": 45,
-        "value": 10
+        "value": 20
       },
       "glitchintensity": {
         "order": 48,

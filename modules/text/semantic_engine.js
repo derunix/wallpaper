@@ -143,17 +143,32 @@ const EN_PACK = {
     hoverText: ['reading the internal log, are we.', 'eyes on the diagnostics.', 'hovering does not fix it.'],
     longIdle: ['idle thoughts only.', 'still here. barely.', 'long silence. noted.'],
   },
+  liveDataPhrases: [
+    'cpu {cpu}%. noted.',
+    'memory {ram}%. {comment}',
+    'cpu {cpu}%, gpu {gpu}%. holding.',
+    'temp {temp}°c. logged.',
+    'memory {ram}% used.',
+    'download {down} / upload {up}.',
+    'vram {vram}%. gpu busy.',
+    'cpu {cpu}%: {comment}',
+    'load: cpu {cpu}%, memory {ram}%.',
+    'gpu {gpu}%, vram {vram}%. nominal.',
+    'cpu {cpu}%, temp {temp}°c.',
+  ],
   templates: [
-    { template: '{STATUS}. {COMMENT}', weight: 1.2 },
-    { template: '{MARKOV_PHRASE}, {COMMENT}', weight: 1.1 },
+    { template: '{STATUS}. {COMMENT}', weight: 1.2, states: { STABLE: 1.3, IDLE: 1.2 } },
+    { template: '{MARKOV_PHRASE}, {COMMENT}', weight: 1.1, moods: ['calm', 'steady'] },
     { template: '{COMMENT}. {MARKOV_PHRASE}', weight: 1.0 },
-    { template: '{SYSTEM_ENTITY} is {ADJECTIVE}. {COMMENT}', weight: 1.0 },
-    { template: '{SYSTEM_ENTITY} {VERB}. {COMMENT}', weight: 1.0 },
-    { template: '{SARCASM} {STATUS}.', weight: 0.9 },
+    { template: '{SYSTEM_ENTITY} is {ADJECTIVE}. {COMMENT}', weight: 1.0, moods: ['tense', 'chaotic'] },
+    { template: '{SYSTEM_ENTITY} {VERB}. {COMMENT}', weight: 1.0, moods: ['tense', 'chaotic'] },
+    { template: '{SARCASM} {STATUS}.', weight: 0.9, moods: ['tense', 'chaotic'] },
     { template: '{EVENT_PHRASE}. {COMMENT}', weight: 1.2 },
     { template: '{MARKOV_PHRASE}. {PAST_REFERENCE}', weight: 0.7 },
-    { template: '{ALIEN_FRAGMENT} {MARKOV_PHRASE}', weight: 0.6 },
-    { template: '{CONNECTIVE}, {STATUS}.', weight: 0.8 },
+    { template: '{ALIEN_FRAGMENT} {MARKOV_PHRASE}', weight: 0.6, moods: ['chaotic'] },
+    { template: '{CONNECTIVE}, {STATUS}.', weight: 0.8, moods: ['calm', 'steady'] },
+    { template: '{LIVE_DATA}', weight: 0.9, states: { STABLE: 1.1, ACTIVE: 1.2 } },
+    { template: '{LIVE_DATA} {COMMENT}', weight: 0.75, states: { ACTIVE: 1.1, STABLE: 1.0 } },
   ],
   corpusTemplates: [
     '{STATUS}. {CONNECTIVE}.',
@@ -187,26 +202,39 @@ const RU_PACK = {
     'пакет', 'вектор', 'шлюз', 'очередь', 'контур', 'топология', 'схема', 'сеть', 'лог', 'след', 'рутина',
     'команда', 'стек', 'куча', 'адрес', 'драйвер', 'микрокод', 'кластер', 'контроллер', 'реле', 'регулятор',
     'контекст', 'состояние', 'профиль', 'протокол', 'слот', 'переход', 'шунт', 'петля', 'сшивка', 'датчик',
-    'трасса', 'мост', 'сборка', 'шинаданных', 'ядро-цикл', 'каркас', 'узелок', 'вилка', 'разъем',
+    'трасса', 'мост', 'сборка', 'каркас', 'разъем', 'фрейм', 'сессия', 'транзакция', 'дескриптор', 'прерывание',
+    'латентность', 'джиттер', 'смещение', 'дрейф', 'компрессор', 'арбитр', 'дроссель', 'тактовый генератор',
+    'планировщик', 'мьютекс', 'семафор', 'блокировка', 'индекс', 'хэш', 'чексумма', 'патч', 'секция', 'сектор',
   ],
   verbs: [
     'дрейфует', 'задыхается', 'пересчитывается', 'буксует', 'тормозит', 'плавает', 'пульсирует', 'отваливается',
     'срывается', 'зависает', 'забивается', 'подтекает', 'притворяется', 'откатывается', 'перезапускается',
     'дробится', 'размывается', 'проваливается', 'засоряется', 'перегревается', 'компрессируется',
-    'разрежается', 'смазывается', 'глохнет', 'съезжает', 'дребезжит', 'перескакивает', 'срывается', 'мерцает',
+    'разрежается', 'смазывается', 'глохнет', 'съезжает', 'дребезжит', 'перескакивает', 'мерцает',
+    'рассыпается', 'скисает', 'барахлит', 'буфeрится', 'сдувается', 'спотыкается', 'прогибается',
+    'расщепляется', 'замирает', 'сипит', 'пропускает', 'накапливается', 'запаздывает', 'рябит',
+    'скачет', 'нервничает', 'клинит', 'захлебывается', 'вибрирует', 'дрожит', 'ускользает', 'съеживается',
+    'деградирует', 'болтается', 'спотыкается', 'пульсирует', 'тлеет', 'утекает', 'разваливается',
   ],
   adjectives: [
     'нестабильный', 'усталый', 'частичный', 'шумный', 'устаревший', 'фрагментированный', 'номинальный',
     'перегретый', 'ломкий', 'вязкий', 'смещенный', 'тусклый', 'нервный', 'подозрительный', 'дрожащий',
     'разреженный', 'потертый', 'сбитый', 'глухой', 'плавающий', 'хрупкий', 'задыхающийся', 'перекошенный',
+    'мутный', 'заторможенный', 'рваный', 'перегруженный', 'скособоченный', 'бледный', 'рассеянный',
+    'замыленный', 'ленивый', 'расшатанный', 'дырявый', 'перегнутый', 'кривой', 'вялый', 'скрипучий',
+    'полуживой', 'заезженный', 'сонный', 'сомнительный', 'хромающий', 'протекающий', 'избыточный',
+    'недокормленный', 'перегретый', 'скользкий', 'призрачный', 'угасающий', 'изношенный',
   ],
   sarcasmMarkers: [
     'конечно', 'как всегда', 'опять', 'ну да', 'разумеется', 'естественно', 'прекрасно', 'великолепно',
-    'очень вовремя', 'как удобно', 'очевидно',
+    'очень вовремя', 'как удобно', 'очевидно', 'надо же', 'невероятно', 'неожиданно', 'какой сюрприз',
+    'ну и дела', 'что и требовалось', 'не удивительно', 'ожидаемо', 'как и планировалось',
   ],
   connectives: [
     'между тем', 'впрочем', 'в любом случае', 'так или иначе', 'пока', 'пожалуй', 'если что', 'в теории',
-    'на практике', 'как ни странно', 'по привычке', 'в целом',
+    'на практике', 'как ни странно', 'по привычке', 'в целом', 'для протокола', 'тем не менее',
+    'в общем и целом', 'с натяжкой', 'на удивление', 'при прочих равных', 'если повезет', 'без паники',
+    'на всякий случай', 'по крайней мере', 'как это ни странно', 'против ожиданий',
   ],
   brokenTokens: ['///', '...', '--', '??', '##', '!!', '::', '==', '~~'],
   prefixes: ['псевдо-', 'квази-', 'сверх-', 'ультра-', 'нано-', 'микро-', 'мета-', 'гипер-', 'суб-', 'интер-'],
@@ -214,6 +242,8 @@ const RU_PACK = {
   entities: [
     'решетка сигнала', 'поток данных', 'банк памяти', 'контур связи', 'слой кэша', 'узловая сетка',
     'буферный стек', 'пул потоков', 'контрольная шина', 'матрица датчиков', 'контур протокола',
+    'тепловой рельс', 'дроссель частоты', 'арбитр шины', 'стек прерываний', 'планировщик задач',
+    'сетка адресов', 'поле регистров', 'очередь пакетов', 'фрейм передачи',
   ],
   comments: [
     'ничего не горит. пока.',
@@ -225,55 +255,218 @@ const RU_PACK = {
     'сигнал держится. еле-еле.',
     'я сделаю вид, что это нормально.',
     'числа вежливые. система нет.',
+    'фиксирую. не исправляю.',
+    'логи молчат. это хуже крика.',
+    'всё под контролем. не моим.',
+    'нормально для данного состояния.',
+    'хуже было. и ещё будет.',
+    'на первый взгляд — живое.',
+    'держится. не знаю зачем.',
+    'ошибок нет. это тоже ошибка.',
+    'продолжаю делать вид что слежу.',
+    'внешне спокойно. внутри — нет.',
+    'если это сломается, я предупреждал.',
+    'да, я замечаю. нет, не скажу.',
+    'система отвечает. вопрос — что.',
+    'уже лучше. хотя хуже некуда.',
+    'всё идёт по плану. чьему — вопрос.',
+    'принял. не понял. продолжаю.',
   ],
   idleFragments: [
     'ожидание. тихо.',
     'входов нет. мыслей мало.',
-    'idle, не сон.',
     'держу контур.',
     'режим ожидания.',
+    'ничего не происходит. пока.',
+    'тишина на всех каналах.',
+    'мониторю пустоту.',
+    'нет событий. это подозрительно.',
+    'ждем. без особого оптимизма.',
+    'контур стабилен. скучно.',
+    'сигналов нет. хорошо это или плохо.',
+    'слушаю шум между данными.',
+    'жду следующего события.',
+    'quiet mode. не по желанию.',
+    'процессы живы. я тоже.',
   ],
   statusByState: {
-    STABLE: ['стабильно', 'база выровнена', 'сигнал номинален', 'без тревоги'],
-    ACTIVE: ['активность растет', 'входы активны', 'контуры в работе', 'нагрузка живая'],
-    OVERLOAD: ['перегруз', 'сжатие пределов', 'нагрев растет', 'лимиты против'],
-    DEGRADED: ['деградация', 'шум просачивается', 'структура ослабла', 'ошибки допущены'],
-    RECOVERY: ['восстанавливаю', 'собираю заново', 'стабилизируюсь', 'выравниваю'],
-    IDLE: ['ожидание', 'низкая активность', 'тишина', 'сон наготове'],
-    ANOMALY: ['аномалия', 'сбой состояния', 'конфликт датчиков', 'логика спорит'],
+    STABLE: ['стабильно', 'база выровнена', 'сигнал номинален', 'без тревоги', 'ровно', 'всё по норме', 'держится'],
+    ACTIVE: ['активность растет', 'входы активны', 'контуры в работе', 'нагрузка живая', 'потоки кипят', 'движение есть'],
+    OVERLOAD: ['перегруз', 'сжатие пределов', 'нагрев растет', 'лимиты против', 'система кряхтит', 'термальный стресс'],
+    DEGRADED: ['деградация', 'шум просачивается', 'структура ослабла', 'ошибки допущены', 'целостность под вопросом', 'качество падает'],
+    RECOVERY: ['восстанавливаю', 'собираю заново', 'стабилизируюсь', 'выравниваю', 'возвращаюсь в норму', 'медленно но верно'],
+    IDLE: ['ожидание', 'низкая активность', 'тишина', 'сон наготове', 'на паузе', 'полупустой'],
+    ANOMALY: ['аномалия', 'сбой состояния', 'конфликт датчиков', 'логика спорит', 'поведение нетипично', 'что-то не так'],
   },
   eventPhrases: {
-    cpuSpike: ['скачок cpu. мило.', 'ядра жарятся. снова.', 'cpu вздохнул. громко.'],
-    gpuSpike: ['скачок gpu. ожидаемо.', 'рендер кипит.', 'gpu греется. отметил.'],
-    netDrop: ['сеть упала. как мило.', 'линк замолчал.', 'пакеты исчезли.'],
-    netRestore: ['линк вернулся. пока.', 'сеть восстановлена. подозрительно.', 'трафик снова жив.'],
-    diskAnomaly: ['аномалия диска. тихий скрежет.', 'диск занят. слишком.', 'хранилище дернулось.'],
-    weatherChange: ['погода сменилась. опять.', 'атмосфера обновилась.', 'прогноз передумал.'],
-    trackChange: ['трек сменился. настроение тоже.', 'аудио изменилось.', 'другая дорожка. ладно.'],
-    TRACK_CHANGE: ['трек сменился. настроение тоже.', 'аудио изменилось.', 'другая дорожка. ладно.'],
-    endpointOffline: ['локальный endpoint оффлайн.', 'канал датчиков потерян.', 'железо молчит.'],
-    endpointOnline: ['endpoint вернулся.', 'датчики снова на связи.', 'железо онлайн.'],
-    glitchEvent: ['глитч принят.', 'целостность нарушена.', 'сигнал искажен.'],
-    recovery: ['собираю систему.', 'восстановление идет.', 'стабильность возвращается.'],
+    cpuSpike: [
+      'скачок cpu. мило.',
+      'ядра жарятся. снова.',
+      'cpu вздохнул. громко.',
+      'процессор вспотел.',
+      'ядра не справляются. терпят.',
+      'cpu перебрал. в очередной раз.',
+      'нагрузка на cpu выше ожидаемой. сюрприз.',
+    ],
+    gpuSpike: [
+      'скачок gpu. ожидаемо.',
+      'рендер кипит.',
+      'gpu греется. отметил.',
+      'видеоядро перестаралось.',
+      'gpu решил показать характер.',
+      'рендер-путь перегружен.',
+    ],
+    netDrop: [
+      'сеть упала. как мило.',
+      'линк замолчал.',
+      'пакеты исчезли.',
+      'соединение прервалось. ничего нового.',
+      'сеть решила отдохнуть.',
+      'пропускная способность испарилась.',
+    ],
+    netRestore: [
+      'линк вернулся. пока.',
+      'сеть восстановлена. подозрительно.',
+      'трафик снова жив.',
+      'соединение восстановлено. ненадолго.',
+      'сеть одумалась.',
+      'пакеты снова идут. хорошо.',
+    ],
+    diskAnomaly: [
+      'аномалия диска. тихий скрежет.',
+      'диск занят. слишком.',
+      'хранилище дернулось.',
+      'накопитель нервничает.',
+      'диск пишет что-то своё.',
+      'i/o активность выше нормы.',
+    ],
+    weatherChange: [
+      'погода сменилась. опять.',
+      'атмосфера обновилась.',
+      'прогноз передумал.',
+      'метео-данные обновлены. не спрашивай.',
+      'снаружи что-то происходит.',
+    ],
+    trackChange: [
+      'трек сменился. настроение тоже.',
+      'аудио изменилось.',
+      'другая дорожка. ладно.',
+      'медиапоток обновлен.',
+      'слушаем другое. понял.',
+      'новый трек. мониторю.',
+    ],
+    TRACK_CHANGE: [
+      'трек сменился. настроение тоже.',
+      'аудио изменилось.',
+      'другая дорожка. ладно.',
+      'медиапоток обновлен.',
+      'слушаем другое. понял.',
+    ],
+    endpointOffline: [
+      'локальный endpoint оффлайн.',
+      'канал датчиков потерян.',
+      'железо молчит.',
+      'аппаратный канал закрылся.',
+      'мониторинг недоступен. жду.',
+      'датчики не отвечают. это плохо.',
+    ],
+    endpointOnline: [
+      'endpoint вернулся.',
+      'датчики снова на связи.',
+      'железо онлайн.',
+      'аппаратный канал восстановлен.',
+      'мониторинг снова работает.',
+      'данные снова поступают.',
+    ],
+    glitchEvent: [
+      'глитч принят.',
+      'целостность нарушена.',
+      'сигнал искажен.',
+      'артефакт зафиксирован.',
+      'помехи в канале. ожидаемо.',
+      'рябь в матрице. бывает.',
+    ],
+    recovery: [
+      'собираю систему.',
+      'восстановление идет.',
+      'стабильность возвращается.',
+      'дефрагментирую состояние.',
+      'возвращаюсь к норме. медленно.',
+      'восстановление подтверждено.',
+    ],
   },
   userEventPhrases: {
-    wake: ['внимание получено.', 'снова здесь.', 'вернулся. ладно.'],
-    firstClickAfterIdle: ['первый клик после тишины. отмечено.', 'о, ты снова тут.', 'ввод возобновлен.'],
-    rapidClicks: ['да, я это чувствую.', 'хватит щелкать.', 'вводов достаточно.'],
-    hoverText: ['читаешь внутренний лог.', 'взгляд в диагностику.', 'наведение не лечит.'],
-    longIdle: ['мысли в режиме ожидания.', 'тишина затянулась.', 'долгий простой. отмечено.'],
+    wake: [
+      'внимание получено.',
+      'снова здесь.',
+      'вернулся. ладно.',
+      'активность зафиксирована.',
+      'вижу тебя. привет.',
+      'пользователь обнаружен. продолжаю.',
+    ],
+    firstClickAfterIdle: [
+      'первый клик после тишины. отмечено.',
+      'о, ты снова тут.',
+      'ввод возобновлен.',
+      'долго же тебя не было.',
+      'сигнал после паузы. записал.',
+      'активность после простоя. интересно.',
+    ],
+    rapidClicks: [
+      'да, я это чувствую.',
+      'хватит щелкать.',
+      'вводов достаточно.',
+      'получил. всё получил.',
+      'успокойся. система слышит.',
+      'много кликов за раз. нервничаешь?',
+    ],
+    hoverText: [
+      'читаешь внутренний лог.',
+      'взгляд в диагностику.',
+      'наведение не лечит.',
+      'смотришь? я тоже смотрю.',
+      'любопытство зафиксировано.',
+      'диагностику читают редко. отмечаю.',
+    ],
+    longIdle: [
+      'мысли в режиме ожидания.',
+      'тишина затянулась.',
+      'долгий простой. отмечено.',
+      'никого нет. мониторю сам себя.',
+      'простой. сижу. думаю.',
+      'тебя нет. данные всё равно идут.',
+    ],
   },
+  liveDataPhrases: [
+    'cpu {cpu}%. отметил.',
+    'память {ram}%. {comment}',
+    'cpu {cpu}%, gpu {gpu}%. держится.',
+    'температура {temp}°c. {comment}',
+    'память {ram}% занята.',
+    'download {down} / upload {up}.',
+    'vram {vram}%. видеокарта занята.',
+    'cpu {cpu}%: {comment}',
+    'нагрузка: cpu {cpu}%, память {ram}%.',
+    'gpu {gpu}%, vram {vram}%. в норме.',
+    'cpu {cpu}%, температура {temp}°c.',
+  ],
   templates: [
-    { template: '{STATUS}. {COMMENT}', weight: 1.2 },
-    { template: '{MARKOV_PHRASE}, {COMMENT}', weight: 1.1 },
+    { template: '{STATUS}. {COMMENT}', weight: 1.2, states: { STABLE: 1.3, IDLE: 1.2 } },
+    { template: '{MARKOV_PHRASE}, {COMMENT}', weight: 1.1, moods: ['calm', 'steady'] },
     { template: '{COMMENT}. {MARKOV_PHRASE}', weight: 1.0 },
-    { template: '{SYSTEM_ENTITY} — {ADJECTIVE}. {COMMENT}', weight: 1.0 },
-    { template: '{SYSTEM_ENTITY} {VERB}. {COMMENT}', weight: 1.0 },
-    { template: '{SARCASM} {STATUS}.', weight: 0.9 },
+    { template: '{SYSTEM_ENTITY} — {ADJECTIVE}. {COMMENT}', weight: 1.0, moods: ['tense', 'chaotic'] },
+    { template: '{SYSTEM_ENTITY} {VERB}. {COMMENT}', weight: 1.0, moods: ['tense', 'chaotic'] },
+    { template: '{SARCASM} {STATUS}.', weight: 0.9, moods: ['tense', 'chaotic'] },
     { template: '{EVENT_PHRASE}. {COMMENT}', weight: 1.2 },
     { template: '{MARKOV_PHRASE}. {PAST_REFERENCE}', weight: 0.7 },
-    { template: '{ALIEN_FRAGMENT} {MARKOV_PHRASE}', weight: 0.6 },
-    { template: '{CONNECTIVE}, {STATUS}.', weight: 0.8 },
+    { template: '{ALIEN_FRAGMENT} {MARKOV_PHRASE}', weight: 0.6, moods: ['chaotic'] },
+    { template: '{CONNECTIVE}, {STATUS}.', weight: 0.8, moods: ['calm', 'steady'] },
+    { template: '{SARCASM}: {SYSTEM_ENTITY} {VERB}.', weight: 0.85, moods: ['tense', 'chaotic'] },
+    { template: '{SYSTEM_ENTITY} {VERB}. {CONNECTIVE}.', weight: 0.9 },
+    { template: '{COMMENT}. {CONNECTIVE}, {STATUS}.', weight: 0.75, states: { STABLE: 1.1, IDLE: 1.0 } },
+    { template: '{SARCASM}. {SYSTEM_ENTITY} — {ADJECTIVE}.', weight: 0.8, moods: ['chaotic'] },
+    { template: '{LIVE_DATA}', weight: 0.9, states: { STABLE: 1.1, ACTIVE: 1.2 } },
+    { template: '{LIVE_DATA} {COMMENT}', weight: 0.75, states: { ACTIVE: 1.1, STABLE: 1.0 } },
   ],
   corpusTemplates: [
     '{STATUS}. {CONNECTIVE}.',
@@ -285,6 +478,8 @@ const RU_PACK = {
     '{SYSTEM_ENTITY} остается {ADJECTIVE}.',
     '{MARKOV_PHRASE}.',
     '{CONNECTIVE}, {STATUS}.',
+    '{SARCASM}: {SYSTEM_ENTITY} {VERB}.',
+    '{SYSTEM_ENTITY} {VERB}. {CONNECTIVE}.',
   ],
   seedSentences: [
     'ничего не горит. пока.',
@@ -295,6 +490,13 @@ const RU_PACK = {
     'я сделаю вид, что это нормально.',
     'числа вежливые. система нет.',
     'всё стабильно. если верить цифрам.',
+    'фиксирую. не исправляю.',
+    'логи молчат. это хуже крика.',
+    'нормально для данного состояния.',
+    'хуже было. и ещё будет.',
+    'держится. не знаю зачем.',
+    'ошибок нет. это тоже ошибка.',
+    'система отвечает. вопрос — что.',
   ],
 };
 
@@ -304,8 +506,21 @@ const LANGUAGE_PACKS = {
 };
 
 const PAST_REFERENCES = {
-  'en-US': ['still the same', 'nothing changed', 'as mentioned earlier'],
-  'ru-RU': ['всё как было', 'ничего не изменилось', 'как уже говорилось'],
+  'en-US': [
+    'still the same', 'nothing changed', 'as mentioned earlier',
+    'same as before', 'no improvement', 'unchanged',
+    'still watching', 'noted earlier', 'as expected',
+    'predictable', 'as usual', 'no surprises there',
+    'consistent with prior readings', 'pattern holds',
+  ],
+  'ru-RU': [
+    'всё как было', 'ничего не изменилось', 'как уже говорилось',
+    'без изменений', 'картина та же', 'ожидаемо',
+    'как прежде', 'уже замечал', 'паттерн держится',
+    'ничего нового', 'стабильно', 'снова это',
+    'улучшений нет', 'привычная ситуация', 'отмечал раньше',
+    'так и осталось', 'по-прежнему',
+  ],
 };
 
 const EVENT_TYPE_ALIASES = {
@@ -981,7 +1196,7 @@ export class SemanticEngine {
     this.lexiconPack = getLexiconPack(this.language);
     this.pack = mergePack(LANGUAGE_PACKS[this.language] || EN_PACK, this.lexiconPack);
     this.lexicon = buildLexicon(this.pack, this.lexiconPack);
-    this.markov = new ThematicMarkov(2);
+    this.markov = new ThematicMarkov(3);
     this.planner = new IntentPlanner();
     this.grammar = new WeightedGrammar(this.pack, this.lexiconPack, { language: this.language });
     this.templateEngine = new TemplateEngine(this.pack);
@@ -1009,6 +1224,8 @@ export class SemanticEngine {
       lastEmittedAt: 0,
       lastText: '',
       glitchyStreak: 0,
+      lastEventType: '',
+      lastEventAt: 0,
     };
     this._candidatePool = buildCandidatePool(CANDIDATE_POOL_LIMIT);
     this._allocStats = { candidates: 0, grammar: 0, templates: 0, markov: 0 };
@@ -1059,6 +1276,8 @@ export class SemanticEngine {
     this.modeState.lastEmittedAt = 0;
     this.modeState.lastText = '';
     this.modeState.glitchyStreak = 0;
+    this.modeState.lastEventType = '';
+    this.modeState.lastEventAt = 0;
     if (this._allocStats) {
       this._allocStats.candidates = 0;
       this._allocStats.grammar = 0;
@@ -1138,6 +1357,15 @@ export class SemanticEngine {
       preemptiveWarnings: this.config.preemptiveWarnings,
       textModeStrategy: this.config.textModeStrategy,
       smartCandidateCount: this.config.smartCandidateCount,
+      liveMetrics: {
+        cpu: base.metrics?.cpu ?? null,
+        gpu: base.metrics?.gpu ?? null,
+        ram: base.metrics?.mem ?? null,
+        temp: base.metrics?.cpu_temp ?? null,
+        vram: base.metrics?.vram ?? null,
+        down: base.metrics?.down ?? null,
+        up: base.metrics?.up ?? null,
+      },
       glitchState: {
         ...glitch,
         activeCount,
@@ -1343,6 +1571,9 @@ export class SemanticEngine {
       eventType: eventInfo.type,
       preemptiveWarning: preemptive,
       coherence: personality.coherence,
+      lastEventType: this.modeState.lastEventType,
+      lastEventAt: this.modeState.lastEventAt,
+      now: context.now ?? performance.now(),
     });
     const intent = intentPlan.intent;
 
@@ -1763,6 +1994,7 @@ export class SemanticEngine {
       UNCERTAIN: () => this.tone.pickUncertain(style),
       BROKEN: () => this._pickBroken(context, style),
       ALIEN: () => this._pickAlienToken(context, style),
+      LIVE_DATA: () => this._pickLiveDataPhrase(context),
     };
 
     const templateContext = {
@@ -1799,6 +2031,43 @@ export class SemanticEngine {
     };
   }
 
+  _pickLiveDataPhrase(context) {
+    const phrases = this.pack.liveDataPhrases || [];
+    if (!phrases.length) return '';
+    const m = context.liveMetrics || {};
+    const fmt = n => (n != null && Number.isFinite(n)) ? Math.round(n) : null;
+    const cpu = fmt(m.cpu);
+    const ram = fmt(m.ram);
+    const gpu = fmt(m.gpu);
+    const temp = fmt(m.temp);
+    const vram = fmt(m.vram);
+    const down = m.down || null;
+    const up = m.up || null;
+    const usable = phrases.filter(p => {
+      if (p.includes('{cpu}') && cpu == null) return false;
+      if (p.includes('{ram}') && ram == null) return false;
+      if (p.includes('{gpu}') && gpu == null) return false;
+      if (p.includes('{temp}') && temp == null) return false;
+      if (p.includes('{vram}') && vram == null) return false;
+      if (p.includes('{down}') && down == null) return false;
+      if (p.includes('{up}') && up == null) return false;
+      return true;
+    });
+    if (!usable.length) return '';
+    const comment = this.tone.pickComment(context, context.styleProfile || {});
+    let phrase = usable[Math.floor(Math.random() * usable.length)];
+    phrase = phrase
+      .replace('{cpu}', cpu)
+      .replace('{ram}', ram)
+      .replace('{gpu}', gpu)
+      .replace('{temp}', temp)
+      .replace('{vram}', vram)
+      .replace('{down}', down)
+      .replace('{up}', up)
+      .replace('{comment}', comment);
+    return phrase;
+  }
+
   _buildMarkovPhrase(topicWeights, style = {}) {
     const minWords = clamp(style.verbosityTarget?.minWords ?? MIN_WORDS, MIN_WORDS, MAX_WORDS);
     const maxWords = clamp(style.verbosityTarget?.maxWords ?? MAX_WORDS, minWords, MAX_WORDS);
@@ -1831,7 +2100,13 @@ export class SemanticEngine {
         type === 'TRACK_CHANGE' && !payload && context.musicContext?.novelty?.isNewTrack
           ? this._buildTrackPayload(context.musicContext)
           : payload;
-      this.eventQueue.enqueue(type, enriched, now);
+      if (this.eventQueue.enqueue(type, enriched, now)) {
+        // Track the most recent non-track event for narrative arc
+        if (type !== 'TRACK_CHANGE' && type !== 'USER_WAKE' && type !== 'RAPID_CLICKS') {
+          this.modeState.lastEventType = type;
+          this.modeState.lastEventAt = now;
+        }
+      }
     });
 
     const inputEvents = context.userInputEvents || {};

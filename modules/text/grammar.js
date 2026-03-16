@@ -94,6 +94,11 @@ export class WeightedGrammar {
       ...asWeighted(failure, 0.85),
       ...asWeighted(repair, 0.7),
     ];
+    // Personality-tuned pools for context-aware whine selection
+    this.fatiguedPhrases = [...asWeighted(pack.idleFragments || [], 1.2), ...asWeighted(exhaustion, 1.0)];
+    this.irritatedPhrases = [...asWeighted(sarcasm, 1.4), ...asWeighted(exhaustion, 0.7)];
+    this.suspiciousPhrases = [...asWeighted(uncertainty, 1.3), ...asWeighted(diagnostics, 1.0)];
+
     if (this.language && this.language.toLowerCase().startsWith('ru')) {
       this.preemptiveWarnings = [
         'давление ресурсов растет. могу упроститься.',
@@ -124,13 +129,14 @@ export class WeightedGrammar {
   _buildPredicate(intent) {
     const verbs = this.pack.verbs || [];
     const adjectives = this.pack.adjectives || [];
+    const isRu = this.language.toLowerCase().startsWith('ru');
     if (intent === INTENTS.SELF_DIAG || intent === INTENTS.ANOMALY_WARNING) {
-      const verb = pick(verbs);
-      return verb ? `${verb}` : pick(adjectives) ? `is ${pick(adjectives)}` : '';
+      return pick(verbs) || '';
     }
     if (Math.random() < 0.5) {
       const adj = pick(adjectives);
-      return adj ? `is ${adj}` : pick(verbs) || '';
+      if (!adj) return pick(verbs) || '';
+      return isRu ? adj : `is ${adj}`;
     }
     return pick(verbs) || '';
   }
@@ -138,8 +144,13 @@ export class WeightedGrammar {
   _buildWhine(context) {
     const intensity = clamp(context.whiningIntensity ?? 1, 0, 2);
     const fatigue = clamp(context.personality?.fatigue ?? 0.5, 0, 1);
+    const irritation = clamp(context.personality?.irritation ?? 0.4, 0, 1);
+    const suspicion = clamp(context.personality?.suspicion ?? 0.4, 0, 1);
     const chance = clamp(0.65 + intensity * 0.2 + fatigue * 0.2, 0.5, 0.98);
     if (Math.random() > chance) return '';
+    if (fatigue > 0.72 && this.fatiguedPhrases.length && Math.random() < 0.55) return pick(this.fatiguedPhrases);
+    if (irritation > 0.72 && this.irritatedPhrases.length && Math.random() < 0.5) return pick(this.irritatedPhrases);
+    if (suspicion > 0.72 && this.suspiciousPhrases.length && Math.random() < 0.45) return pick(this.suspiciousPhrases);
     return pick(this.whines);
   }
 

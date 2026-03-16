@@ -11,8 +11,7 @@ export function rerankCandidates(candidates, count, context, personality, memory
   const maxChars = options.maxChars ?? 120;
   const desiredIntent = context.intent;
 
-  let best = null;
-  let bestScore = -Infinity;
+  const scored = [];
   for (let i = 0; i < limit; i++) {
     const cand = candidates[i];
     if (!cand || !cand.text) continue;
@@ -47,12 +46,23 @@ export function rerankCandidates(candidates, count, context, personality, memory
     if (hasEmoji(text)) score -= 0.8;
     if (hasSpammyPunct(text)) score -= 0.2;
 
-    if (score > bestScore) {
-      bestScore = score;
-      best = cand;
-    }
+    scored.push({ cand, score });
   }
-  return best;
+
+  if (!scored.length) return null;
+  scored.sort((a, b) => b.score - a.score);
+
+  // Softmax sampling over top-3 to add controlled variety while preserving quality
+  const topK = scored.slice(0, 3).filter(s => s.score > -1.5);
+  if (!topK.length) return scored[0].cand;
+  const weights = topK.map(s => Math.exp(s.score * 2.0));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < topK.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return topK[i].cand;
+  }
+  return topK[0].cand;
 }
 
 function tokenize(text) {

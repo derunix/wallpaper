@@ -74,7 +74,11 @@ export class GlitchManager {
   }
 
   setConfig(config = {}) {
+    const wasEnabled = this.config.glitchesEnabled;
     Object.assign(this.config, config);
+    if (wasEnabled && !this.config.glitchesEnabled) {
+      this.reset();
+    }
   }
 
   setMoodMultipliers({ freqMul = 1, intensityMul = 1, bigEventBoost = 0, chaotic = false } = {}) {

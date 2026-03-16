@@ -33,6 +33,19 @@ export class IntentPlanner {
       return { intent: INTENTS.TRACK_REACT, reason: 'track' };
     }
 
+    // Narrative arc: follow up on recent events after system returns to calm
+    const lastEvent = context.lastEventType || '';
+    const lastEventAt = context.lastEventAt || 0;
+    const nowMs = context.now ?? performance.now();
+    const timeSince = nowMs - lastEventAt;
+    if (lastEvent && timeSince > 8000 && timeSince < 90000) {
+      const isSpikeEvent = lastEvent === 'CPU_SPIKE' || lastEvent === 'GPU_SPIKE' || lastEvent === 'DISK_ANOMALY' || lastEvent === 'NET_DROP';
+      const isNowCalm = context.systemState === 'STABLE' || context.systemState === 'RECOVERY' || context.systemState === 'IDLE';
+      if (isSpikeEvent && isNowCalm && Math.random() < 0.28) {
+        return { intent: INTENTS.RECOVERY_NOTE, reason: 'narrative_arc' };
+      }
+    }
+
     if (eventType === 'RECOVERY' || context.systemState === 'RECOVERY') {
       return { intent: INTENTS.RECOVERY_NOTE, reason: 'recovery' };
     }

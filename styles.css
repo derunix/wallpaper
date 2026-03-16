@@ -284,7 +284,7 @@ canvas {
   min-height: 440px;
   min-width: 0;
   padding: 12px 14px;
-  background: linear-gradient(180deg, rgba(6, 12, 16, 0.45), rgba(4, 7, 10, 0.6));
+  background: transparent;
   border: 2px solid rgba(63, 231, 255, 0.5);
   clip-path: polygon(0 10%, 6% 10%, 6% 0, 94% 0, 94% 10%, 100% 10%, 100% 90%, 94% 90%, 94% 100%, 6% 100%, 6% 90%, 0 90%);
   overflow: hidden;
@@ -317,7 +317,7 @@ canvas {
 .system-text-body {
   position: relative;
   z-index: 1;
-  display: none;
+  display: block;
   flex: 1;
   font-size: calc(18px * var(--text-scale));
   line-height: 1.35;
@@ -331,6 +331,7 @@ canvas {
 }
 
 .system-text-body.visible {
+  display: block;
   opacity: 1;
 }
 
@@ -674,27 +675,53 @@ canvas {
   align-items: center;
 }
 
-.disks .disk-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px;
-  font-size: calc(15px * var(--text-scale));
-  padding: 6px 0;
+.disk-item {
+  padding: 7px 0;
   border-bottom: 1px solid rgba(63, 231, 255, 0.2);
-  font-family: var(--font-tech);
-  letter-spacing: 0.06em;
-  -webkit-font-smoothing: antialiased;
   min-width: 0;
 }
 
-.disks .disk-row .value {
+.disk-item:last-child { border-bottom: none; }
+
+.disk-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-family: var(--font-tech);
+  letter-spacing: 0.06em;
+  -webkit-font-smoothing: antialiased;
+  font-size: calc(15px * var(--text-scale));
+  min-width: 0;
+}
+
+.disk-header .value {
+  font-weight: 700;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
 
-.disks .disk-row:last-child { border-bottom: none; }
+.disk-bar-track {
+  width: 100%;
+  height: 8px;
+  background: linear-gradient(90deg, rgba(63, 231, 255, 0.12), rgba(141, 252, 79, 0.12));
+  border: 1px solid rgba(63, 231, 255, 0.3);
+  clip-path: polygon(0 35%, 3% 35%, 3% 0, 97% 0, 97% 35%, 100% 35%, 100% 65%, 97% 65%, 97% 100%, 3% 100%, 3% 65%, 0 65%);
+  position: relative;
+  overflow: hidden;
+}
+
+.disk-bar-track span {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 0%;
+  background: linear-gradient(90deg, var(--secondary), var(--primary));
+  box-shadow: 0 0 10px rgba(141, 252, 79, 0.5);
+  transition: width 0.5s ease-out;
+}
 
 #debug-overlay {
   position: fixed;

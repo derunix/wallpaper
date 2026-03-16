@@ -59,12 +59,8 @@ const trackTitleEl = document.getElementById('track-title');
 const trackArtistEl = document.getElementById('track-artist');
 const trackStatusEl = document.getElementById('track-status');
 const systemTextPanelEl = document.getElementById('system-text-panel');
-const systemTextEl = document.getElementById('system-text');
-const systemTextTitleEl = document.getElementById('title-system-text');
 const clockTimeEl = document.getElementById('clock-time');
 const clockDateEl = document.getElementById('clock-date');
-const calendarHeaderEl = document.getElementById('calendar-header');
-const calendarGridEl = document.getElementById('calendar-grid');
 const calendarEl = document.querySelector('.calendar');
 const weatherTempEl = document.getElementById('weather-temp');
 const weatherCityEl = document.getElementById('weather-city');
@@ -98,6 +94,8 @@ const netUpEl = document.getElementById('net-up');
 const netIpEl = document.getElementById('net-ip');
 const diskCEl = document.getElementById('disk-c');
 const diskDEl = document.getElementById('disk-d');
+const diskCBarEl = document.getElementById('disk-c-bar');
+const diskDBarEl = document.getElementById('disk-d-bar');
 const hwStatusEl = document.getElementById('hw-status');
 const hwUpdateEl = document.getElementById('hw-update');
 const cpuCoresEl = document.getElementById('cpu-cores');
@@ -669,7 +667,7 @@ registerWallpaperAudio(audioEngine, arr => {
 
 const scheduler = new Scheduler();
 const weatherService = new WeatherService({ provider: 'open-meteo', units: state.units }, updateWeatherUI);
-const perfService = new PerfService('http://127.0.0.1:5000/performance', updatePerfUI);
+const perfService = new PerfService('http://172.25.160.1:8085/data.json', updatePerfUI);
 const ipService = new ExternalIpService(updateExternalIpUI);
 const nowPlayingService = new NowPlayingService(updateNowPlayingUI);
 
@@ -687,9 +685,8 @@ const schedulerTasks = {
     intervalMs: 5000,
     jitterMs: 500,
     handler: () =>
-      perfService.fetch().catch(err => {
+      perfService.fetch().catch(() => {
         perfService.fail();
-        throw err;
       }),
   }),
   ip: scheduler.addTask('ip', {
@@ -742,7 +739,7 @@ function init() {
   eventBus.on('block:pin', evt => handleBlockPin(evt));
   eventBus.on('block:uncertain', evt => handleBlockUncertain(evt));
   eventBus.on('gesture:hidden', evt => handleHiddenGesture(evt));
-  eventBus.on('gesture:circle', evt => handleCircleGesture(evt));
+  eventBus.on('gesture:circle', () => handleCircleGesture());
   eventBus.on('diagnostic:flash', evt => handleDiagnosticFlash(evt));
   eventBus.on('profile:temp', evt => handleTemporaryProfile(evt));
   eventBus.on('core:state', evt => handleCoreState(evt));
@@ -806,6 +803,19 @@ function resolveMoodMultipliers(moodClass = 'steady', aggressiveness = 1) {
     bigEventBoost,
     chaotic: moodClass === 'chaotic',
   };
+}
+
+function parseDiskPercent(str) {
+  if (!str) return 0;
+  const pctMatch = str.match(/^(\d+(?:\.\d+)?)%/);
+  if (pctMatch) return parseFloat(pctMatch[1]);
+  const gbMatch = str.match(/([\d.]+)\s*GB\s*\/\s*([\d.]+)\s*GB/i);
+  if (gbMatch) {
+    const used = parseFloat(gbMatch[1]);
+    const total = parseFloat(gbMatch[2]);
+    return total > 0 ? (used / total) * 100 : 0;
+  }
+  return 0;
 }
 
 function setText(el, value) {
@@ -987,7 +997,7 @@ function handleHiddenGesture(evt) {
   interactionFX.triggerPulse(id, 0.7);
 }
 
-function handleCircleGesture(evt) {
+function handleCircleGesture() {
   if (!state.hiddenGesturesEnabled) return;
   cycleProfile();
 }
@@ -1212,7 +1222,7 @@ function showSystemText(payload) {
   stateStore.markDirty('text');
 }
 
-function updateSystemTextDisplay(dt, displayState = {}) {
+function updateSystemTextDisplay(displayState = {}) {
   logDisplayState = displayState;
 }
 
@@ -1566,6 +1576,10 @@ function updateFrame(dt, now) {
       cpu: state.cache.perf?.psutil?.cpu,
       gpu: state.cache.perf?.psutil?.gpu_usage,
       mem: state.cache.perf?.psutil?.memory,
+      cpu_temp: state.cache.perf?.psutil?.cpu_temp,
+      vram: state.cache.perf?.psutil?.vram_usage,
+      down: formatSpeed(state.cache.perf?.psutil?.download_speed, state.language),
+      up: formatSpeed(state.cache.perf?.psutil?.upload_speed, state.language),
     },
     behaviorMemory: behaviorSummary,
     systemEvents,
@@ -1577,9 +1591,9 @@ function updateFrame(dt, now) {
   perfProfiler.end('textGen');
   if (semanticText) showSystemText(semanticText);
   if (state.semanticText.enabled) {
-    updateSystemTextDisplay(dt, semanticEngine.getDisplayState());
+    updateSystemTextDisplay(semanticEngine.getDisplayState());
   } else {
-    updateSystemTextDisplay(dt, { level: 0, jitter: 0, flicker: 0 });
+    updateSystemTextDisplay({ level: 0, jitter: 0, flicker: 0 });
   }
   microAnimations.update(dt);
   overlayMessages.update(dt);
@@ -1608,7 +1622,6 @@ function renderFrame(dt, now) {
   const audioAgg = frameState.audioAgg;
   const musicState = frameState.musicState;
   const glitchDebug = frameState.glitchDebug || { active: [], activeMeta: [], nextIn: 0 };
-  const bigEventActive = frameState.bigEventActive;
   const hit = frameState.hit || { hoveredBlockId: null };
   const inputState = frameState.inputState || { velocity: { x: 0, y: 0 } };
 
@@ -1872,7 +1885,7 @@ function updatePerfUI({ data, online }) {
     coreStateMachine.reportDataStatus('system', false);
     coreStateMachine.reportDataStatus('network', false);
     setText(hwStatusEl, online ? strings.hw.waiting : strings.hw.offline);
-    setText(hwUpdateEl, `${strings.hw.last}: --`);
+    setText(hwUpdateEl, '--');
     updateCpuCores([]);
     perfProfiler.end('perf');
     return;
@@ -1892,6 +1905,8 @@ function updatePerfUI({ data, online }) {
   setText(netUpEl, formatSpeed(p.upload_speed, state.language));
   setText(diskCEl, p.c_disk || '--');
   setText(diskDEl, p.d_disk || '--');
+  if (diskCBarEl) diskCBarEl.style.width = parseDiskPercent(p.c_disk) + '%';
+  if (diskDBarEl) diskDBarEl.style.width = parseDiskPercent(p.d_disk) + '%';
 
   if (lastMetrics) {
     const cpuDelta = Math.abs((p.cpu ?? 0) - (lastMetrics.cpu ?? 0));
@@ -1960,10 +1975,9 @@ function updatePerfUI({ data, online }) {
     });
   }
 
-  const status = online ? strings.hw.online : strings.hw.cached;
-  setText(hwStatusEl, status);
+  setText(hwStatusEl, online ? strings.hw.online : strings.hw.cached);
   const stamp = p.timestamp || data.timestamp;
-  setText(hwUpdateEl, `${strings.hw.last}: ${formatHwTimestamp(stamp)}`);
+  setText(hwUpdateEl, formatHwTimestamp(stamp));
   perfProfiler.end('perf');
 }
 
@@ -2030,32 +2044,6 @@ function updateClock(force = false) {
   }
 }
 
-function updateDebug() {
-  if (!state.debugOverlay) {
-    debugOverlay.hidden = true;
-    return;
-  }
-  debugOverlay.hidden = false;
-  const now = performance.now();
-  const delta = updateDebug.last ? now - updateDebug.last : 16.7;
-  const fps = Math.round(1000 / delta);
-  updateDebug.last = now;
-  debugOverlay.textContent = [
-    `FPS: ${fps}`,
-    `Bars: ${state.audio.bars.length}`,
-    `Waveform: ${state.audio.waveform.length}`,
-    `Weather provider: ${weatherService.options.provider}`,
-    `Audio API: ${typeof window.wallpaperRegisterAudioListener === 'function'}`,
-    `Media API: ${
-      !!(
-        window.wallpaperRegisterMediaInformationListener ||
-        window.wallpaperRegisterMediaPropertiesListener ||
-        window.wallpaperRegisterSongInfoListener
-      )
-    }`,
-  ].join('\n');
-}
-
 // Wallpaper Engine property integration
 function applySettingsToSubsystems(changedKeys) {
   if (!changedKeys || !changedKeys.size) return;
@@ -2109,6 +2097,10 @@ function applySettingsToSubsystems(changedKeys) {
   if (has('hwpollintervalsec')) {
     scheduler.setInterval('perf', settings.getNumber('hwpollintervalsec') * 1000);
   }
+  if (has('hwmonitorurl')) {
+    const url = settings.getString('hwmonitorurl');
+    if (url) perfService.setUrl(url);
+  }
 
   if (has('weatherenabled')) {
     const enabled = settings.getBool('weatherenabled');
@@ -2117,11 +2109,13 @@ function applySettingsToSubsystems(changedKeys) {
     scheduler.setEnabled('weather', enabled);
     if (enabled) schedulerTasks.weather.nextAt = performance.now();
   }
-  if (hasAny('weatherprovider', 'weatherapikey', 'units')) {
+  if (hasAny('weatherprovider', 'weatherapikey', 'weatherlat', 'weatherlon', 'units')) {
     const opts = {
       provider: settings.getString('weatherprovider') || weatherService.options.provider,
       apiKey: settings.getString('weatherapikey') || weatherService.options.apiKey,
       units: settings.getString('units') || weatherService.options.units,
+      lat: settings.getNumber('weatherlat'),
+      lon: settings.getNumber('weatherlon'),
     };
     if (opts.units) state.units = opts.units;
     weatherService.setOptions(opts);

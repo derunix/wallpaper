@@ -23,9 +23,12 @@ window.wallpaperPropertyListener = {
     if (properties.nowplayingcoversize) changes.nowplayingcoversize = properties.nowplayingcoversize;
     if (properties.layoutpreset) changes.layoutpreset = properties.layoutpreset;
     if (properties.hwpollintervalsec) changes.hwpollintervalsec = properties.hwpollintervalsec;
+    if (properties.hwmonitorurl !== undefined) changes.hwmonitorurl = properties.hwmonitorurl;
     if (properties.weatherenabled) changes.weatherenabled = properties.weatherenabled;
     if (properties.weatherprovider) changes.weatherprovider = properties.weatherprovider;
     if (properties.weatherapikey) changes.weatherapikey = properties.weatherapikey;
+    if (properties.weatherlat !== undefined) changes.weatherlat = properties.weatherlat;
+    if (properties.weatherlon !== undefined) changes.weatherlon = properties.weatherlon;
     if (properties.units) changes.units = properties.units;
     if (properties.language) changes.language = properties.language;
     if (properties.textscale) changes.textscale = properties.textscale;
@@ -84,7 +87,7 @@ window.wallpaperPropertyListener = {
     if (properties.bigeventchance) changes.bigeventchance = properties.bigeventchance;
     if (properties.chromaticaberrationenabled)
       changes.chromaticaberrationenabled = properties.chromaticaberrationenabled;
-    if (properties.aliensymbolset) changes.aliensymbolset = properties.aliensymbolset;
+    if (properties.aliensymbolset !== undefined) changes.aliensymbolset = properties.aliensymbolset;
     if (properties.interactivityenabled) changes.interactivityenabled = properties.interactivityenabled;
     if (properties.hovereffectsenabled) changes.hovereffectsenabled = properties.hovereffectsenabled;
     if (properties.clickeffectsenabled) changes.clickeffectsenabled = properties.clickeffectsenabled;
